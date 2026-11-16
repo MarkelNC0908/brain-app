@@ -1,8 +1,8 @@
-# Brain U-tad
+# Brain
 
 App para estudiar con tu **Brain** de apuntes: lee tus asignaturas, muestra los apuntes, un dashboard de entregas y notas,
 un modo juego (tests y flashcards generados de tus propios apuntes) y avisos de entregas cercanas. Cada persona usa su propio
-perfil, con su carpeta de Brain y su campus Blackboard, sin mezclar datos con los demás.
+perfil, con su carpeta de Brain y su campus, sin mezclar datos con los demás.
 
 > Las apps **no están firmadas**: el sistema te avisará la primera vez. Instrucciones abajo.
 
