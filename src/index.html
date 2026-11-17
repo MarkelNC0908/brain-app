@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+<title>Brain</title>
+<link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
+<link rel="stylesheet" href="style.css">
+</head><body>
+<div id="app">
+  <aside id="side">
+    <div class="drag"></div>
+    <button id="who" title="Perfil" hidden></button>
+    <input id="q" type="search" placeholder="Buscar apuntes" autocomplete="off">
+    <nav id="tree"></nav>
+    <footer id="foot">
+      <div id="st"><i id="led" class="busy"></i><span id="sync">Comprobando…</span></div>
+      <div class="acts">
+        <button id="syncbtn" title="Sincronizar (Cmd/Ctrl+Mayús+S)">↻</button>
+        <button id="upbtn" title="Subir archivos a una asignatura">⇡</button>
+        <button id="pushbtn" title="Publicar apuntes (Cmd/Ctrl+Mayús+P)">⇪<b id="badge" hidden></b></button>
+      </div>
+    </footer>
+  </aside>
+  <main id="main">
+    <header id="bar"><button id="back" title="Atrás">‹</button><button id="fwd" title="Adelante">›</button><button id="hbtn" title="Inicio (pantalla principal)">⌂</button><span id="crumb"></span><button id="sbtn" class="tb" title="Modo juego: tests y flashcards de tus apuntes">🎮 Estudiar</button><button id="dbtn" class="tb2" title="Dashboard del curso (calculado desde el Brain)">◧ Dashboard</button><button id="nbtn" class="tb2" title="Avisos: entregas cercanas y novedades de Blackboard">🔔</button><button id="tbtn" class="tb2" title="Terminal (Cmd/Ctrl+J)">⌨ Terminal</button></header>
+    <article id="doc"></article>
+    <section id="term" hidden>
+      <div id="tgrip"></div>
+      <div id="thead"><b>Terminal</b><span id="tcwd"></span>
+        <button id="tsync" title="Abre Claude y le pide actualizar la versión web (claude.ai) del dashboard">↻ Actualizar dashboard web</button>
+        <button id="tclaude" title="Escribe «claude» en la terminal">▶ Claude</button>
+        <button id="trestart" title="Reiniciar el shell">↺</button><button id="tclose" title="Ocultar (Cmd/Ctrl+J)">✕</button></div>
+      <div id="tbody"></div>
+    </section>
+  </main>
+</div>
+<div id="modal" class="ov" hidden><div class="box">
+  <h3>Subir archivos</h3>
+  <div class="two"><select id="m-sigla"></select><select id="m-sub"></select></div>
+  <div id="drop">Arrastra archivos aquí<br><button id="m-pick">o elígelos…</button></div>
+  <ul id="m-list"></ul><p id="m-msg" class="note"></p>
+  <div class="row"><button id="m-cancel">Cerrar</button><button id="m-go" class="pri" disabled>Subir</button></div>
+</div></div>
+<div id="gmodal" class="ov" hidden><div class="box">
+  <h3>Mover a Corregido</h3><p class="note" id="g-t"></p>
+  <input id="g-nota" placeholder="Nota (opcional), p. ej. 8,5/10" autocomplete="off">
+  <div class="row"><button id="g-cancel">Cancelar</button><button id="g-go" class="pri">Mover</button></div>
+</div></div>
+<div id="pmodal" class="ov" hidden><div class="box">
+  <h3>Publicar apuntes</h3>
+  <p class="note">Solo notas de <code>02-Asignaturas/*/apuntes/</code>.</p>
+  <ul id="p-list"></ul>
+  <input id="p-msg" placeholder="Mensaje del commit (opcional)">
+  <p id="p-res" class="note"></p>
+  <div class="row"><button id="p-cancel">Cerrar</button><button id="p-go" class="pri" disabled>Commit y push</button></div>
+</div></div>
+<script src="../node_modules/marked/lib/marked.umd.js"></script>
+<script src="../node_modules/dompurify/dist/purify.min.js"></script>
+<script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+<script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+<script src="perfiles-ui.js"></script>
+<script src="app.js"></script>
+<script src="study.js"></script>
+</body></html>
