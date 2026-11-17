@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('brain', {
   openFile: (rel) => ipcRenderer.invoke('file:open', rel),
   dashAdd: (d) => ipcRenderer.invoke('dash:add', d),
   dashData: () => ipcRenderer.invoke('dash:data'),
+  horarioData: () => ipcRenderer.invoke('horario:data'),
   status: () => ipcRenderer.invoke('git:status'),
   sync: () => ipcRenderer.invoke('git:sync'),
   uploadInfo: () => ipcRenderer.invoke('upload:info'),

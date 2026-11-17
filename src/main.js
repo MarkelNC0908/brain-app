@@ -87,6 +87,16 @@ ipcMain.handle('vault:index', () => {
 });
 ipcMain.handle('file:open', async (e, rel) => { const abs = realPaths.get(rel); if (!fromWin(e) || !abs) return { ok: false }; const err = await shell.openPath(abs); return err ? { ok: false, msg: err } : { ok: true }; });
 ipcMain.handle('vault:pick', (e) => { if (fromWin(e) && win) win.webContents.send('ui:editprofile'); });   // «cambiar carpeta» ahora es editar el perfil
+// Horario: solo lectura de 01-Curso/calendario*.md y 01-Curso/curso.md del Brain (nombres fijos, nada más)
+ipcMain.handle('horario:data', (e) => {
+  if (!fromWin(e) || !vault) return { ok: false, msg: 'Sin carpeta del Brain' };
+  try {
+    const dir = path.join(vault, '01-Curso'), calf = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /^calendario[^/\\]*\.md$/i.test(f)).sort()[0] : null;
+    if (!calf) return { ok: false, msg: 'No hay calendario en 01-Curso (calendario*.md)' };
+    const cur = path.join(dir, 'curso.md');
+    return { ok: true, fuente: '01-Curso/' + calf, cal: fs.readFileSync(path.join(dir, calf), 'utf8'), curso: fs.existsSync(cur) ? fs.readFileSync(cur, 'utf8') : '' };
+  } catch (err) { return { ok: false, msg: String(err.message || err) }; }
+});
 ipcMain.handle('dash:move', (e, card, col, nota) => {
   if (!win || win.isDestroyed() || e.sender !== win.webContents || !vault) return { ok: false, msg: 'No permitido' };
   try { const d = new Date(), hoy = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; return dashboard.move(vault, card, col, nota || '', hoy); }

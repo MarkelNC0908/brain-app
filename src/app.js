@@ -36,7 +36,7 @@ async function load() {
   for (const n of notes) n.hay = norm(n.title + '\n' + n.body);
   q.value ? search(q.value) : buildTree();
   loadDash(); loadBB(); if (!statusIniciado) { statusIniciado = true; refreshStatus(); }   // primer chequeo del LED aunque no haya llegado ningún evento de sincronización
-  if (view === 'dash' || view === 'study' || view === 'avisos') {} else if (current && byPath.has(current)) show(current); else if (!current) home();
+  if (view === 'dash' || view === 'study' || view === 'avisos' || view === 'horario') {} else if (current && byPath.has(current)) show(current); else if (!current) home();
 }
 
 function buildTree() {
@@ -67,7 +67,7 @@ function go(p) {
   const nn = byPath.get(p); if (nn && nn.externo) { window.brain.openFile(p); return; }   // PDF, Word… se abren con su aplicación
   hist = hist.slice(0, hp + 1); hist.push(p); hp = hist.length - 1; show(p); }
 function goSubject(s) { hist = hist.slice(0, hp + 1); hist.push('@' + s); hp = hist.length - 1; subject(s); }
-function nav(d) { const i = hp + d; if (i < 0 || i >= hist.length) return; hp = i; const h = hist[hp]; h === '@study' ? showStudy(false) : h === '@dash' ? showDash(false) : h === '@avisos' ? showAvisos(false) : h === '@home' ? home() : h[0] === '@' ? subject(h.slice(1)) : show(h); }
+function nav(d) { const i = hp + d; if (i < 0 || i >= hist.length) return; hp = i; const h = hist[hp]; h === '@study' ? showStudy(false) : h === '@dash' ? showDash(false) : h === '@avisos' ? showAvisos(false) : h === '@horario' ? showHorario(false) : h === '@home' ? home() : h[0] === '@' ? subject(h.slice(1)) : show(h); }
 const btns = () => { $('#back').disabled = hp <= 0; $('#fwd').disabled = hp >= hist.length - 1; };
 
 function resolve(target) {
@@ -228,7 +228,7 @@ const STALE_DAYS = 7;   // si el Brain no se actualiza en más de 7 días, el LE
 const COLS = [['todo', 'Por hacer'], ['doing', 'En curso'], ['sent', 'Entregado'], ['done', 'Corregido']];
 let dashFilter = 'ALL', dashMsg = null;
 const fdate = (d) => d ? new Date(d + 'T00:00').toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : 'sin fecha';
-async function loadDash() { try { dash = await window.brain.dashData(); } catch (e) { dash = { error: String(e) }; } updateBell(); if (view === 'dash') drawDash(); else if (view === 'avisos') drawAvisos(); }
+async function loadDash() { try { dash = await window.brain.dashData(); } catch (e) { dash = { error: String(e) }; } updateBell(); if (view === 'dash') drawDash(); else if (view === 'avisos') drawAvisos(); else if (view === 'horario') drawHorario(); }
 async function loadBB() { try { bb = await window.brain.bbState(); } catch { bb = null; } updateBell(); if (view === 'dash') drawDash(); else if (view === 'avisos') drawAvisos(); }
 const diasHasta = (f) => Math.round((new Date(f + 'T00:00') - new Date(dash.hoy + 'T00:00')) / 864e5);
 const cercanas = () => dash && dash.items ? dash.items.filter(i => (i.col === 'todo' || i.col === 'doing') && i.fecha && diasHasta(i.fecha) >= 0 && diasHasta(i.fecha) <= 7) : [];
@@ -379,6 +379,83 @@ $('#g-cancel').onclick = () => { gm.hidden = true; pendingMove = null; };
 $('#g-go').onclick = () => { const m = pendingMove; gm.hidden = true; pendingMove = null; if (m) doMove(m.card, m.col, $('#g-nota').value.trim()); };
 $('#g-nota').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#g-go').click(); if (e.key === 'Escape') $('#g-cancel').click(); });
 $('#dbtn').onclick = () => { dashMsg = null; showDash(); };
+$('#hobtn').onclick = () => showHorario();
+// ---- Horario: semana por días y franjas, leído de 01-Curso/calendario*.md (celdas «AAAA-MM-DD SIGLA») y de las franjas «Bloque 1: 17:30 – 20:00» de 01-Curso/curso.md. Solo lectura ----
+// <parse-horario>
+const isoDe = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const sumaDias = (iso, n) => { const d = new Date(iso + 'T00:00'); d.setDate(d.getDate() + n); return isoDe(d); };
+const lunesDe = (iso) => { const d = new Date(iso + 'T00:00'); return sumaDias(iso, -((d.getDay() + 6) % 7)); };
+function parseHorario(cal, curso) {
+  const franjas = [];
+  for (const m of String(curso || '').matchAll(/Bloque\s*(\d)\s*:\s*(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/g)) franjas[+m[1] - 1] = m[2] + '–' + m[3];
+  const dias = {};
+  for (const l of String(cal || '').split(/\r?\n/)) {
+    if (!/^\s*\|/.test(l)) continue;
+    for (const c of l.split('|')) {
+      const m = c.trim().match(/^(\d{4}-\d{2}-\d{2})\s*(.*)$/); if (!m) continue;
+      const txt = m[2].replace(/\*+/g, '').trim();
+      if (!txt) { dias[m[1]] = { festivo: 'Sin clase' }; continue; }
+      if (/festivo/i.test(txt)) { dias[m[1]] = { festivo: txt }; continue; }
+      // «X / Y» = bloque 1 / bloque 2; «—» = ese bloque sin clase; «(ON)» = sesión online; lo que sigue a la sigla es la nota (p. ej. la profesora)
+      const bloques = txt.split(/\s+\/\s+/).map(b => {
+        const on = /\(ON\)/i.test(b), s = b.replace(/\(ON\)/ig, '').trim(), w = s.match(/^([A-Za-zÁÉÍÓÚÑáéíóúñ0-9]{2,})\s*(.*)$/);
+        return w ? { sigla: w[1].toUpperCase(), extra: w[2].trim(), on } : null;
+      });
+      dias[m[1]] = { bloques };
+    }
+  }
+  return { franjas, dias };
+}
+// </parse-horario>
+let hor = null, horSem = null;   // hor = { ok, dias, franjas, fuente } | { ok: false, msg }; horSem = lunes de la semana que se ve
+async function cargaHorario() {
+  let r; try { r = await window.brain.horarioData(); } catch (e) { r = { ok: false, msg: String(e) }; }
+  if (r && r.ok && r.cal) { try { hor = { ok: true, ...parseHorario(r.cal, r.curso), fuente: r.fuente }; } catch (e) { hor = { ok: false, msg: 'No se pudo leer el calendario: ' + e.message }; } }
+  else hor = { ok: false, msg: (r && r.msg) || 'Sin calendario' };
+  if (view === 'horario') drawHorario();
+}
+function showHorario(push = true) {
+  view = 'horario'; current = null;
+  if (push && hist[hp] !== '@horario') { hist = hist.slice(0, hp + 1); hist.push('@horario'); hp = hist.length - 1; }
+  $('#crumb').textContent = 'Horario'; btns(); markOn(); drawHorario(); cargaHorario(); loadDash();
+}
+function drawHorario() {
+  const keep = doc.scrollTop; doc.replaceChildren(); $('#crumb').textContent = 'Horario';
+  const head = el('div', 'dh'); head.append(el('h1', null, 'Horario')); doc.append(head);
+  if (!hor) { doc.append(el('p', 'dsub', 'Leyendo el calendario…')); return; }
+  if (!hor.ok) {
+    doc.append(el('p', 'dsub', hor.msg));
+    doc.append(el('p', 'dsub', 'El horario se lee de 01-Curso/calendario*.md (tabla con celdas «AAAA-MM-DD SIGLA») y de 01-Curso/curso.md (franjas «Bloque 1: 17:30 – 20:00»).')); return;
+  }
+  const fechas = Object.keys(hor.dias).sort(), hoy = (dash && dash.hoy) || isoDe(new Date());
+  if (!fechas.length) { doc.append(el('p', 'dsub', 'El calendario no tiene ninguna fecha con el formato AAAA-MM-DD.')); return; }
+  const min = lunesDe(fechas[0]), max = lunesDe(fechas[fechas.length - 1]);
+  if (!horSem) horSem = lunesDe(hoy < fechas[0] ? fechas[0] : hoy > fechas[fechas.length - 1] ? fechas[fechas.length - 1] : hoy);
+  horSem = horSem < min ? min : horSem > max ? max : horSem;
+  const fmt = (iso, o) => new Date(iso + 'T00:00').toLocaleDateString('es-ES', o), nav = el('div', 'hnav');
+  const ant = el('button', null, '‹ Anterior'), sig = el('button', null, 'Siguiente ›'), hb = el('button', null, 'Hoy');
+  ant.disabled = horSem <= min; sig.disabled = horSem >= max;
+  ant.onclick = () => { horSem = sumaDias(horSem, -7); drawHorario(); }; sig.onclick = () => { horSem = sumaDias(horSem, 7); drawHorario(); }; hb.onclick = () => { horSem = null; drawHorario(); };
+  const fin = sumaDias(horSem, 4);
+  nav.append(ant, el('b', null, `Semana del ${fmt(horSem, { day: 'numeric' })} al ${fmt(fin, { day: 'numeric', month: 'long', year: 'numeric' })}`), sig, hb); doc.append(nav);
+  const nB = Math.max(hor.franjas.length, ...Object.values(hor.dias).map(d => (d.bloques || []).length), 1), grid = el('div', 'hgrid');
+  const pend = dash && dash.items ? dash.items.filter(i => (i.col === 'todo' || i.col === 'doing') && i.fecha) : [];
+  for (let k = 0; k < 5; k++) {
+    const iso = sumaDias(horSem, k), info = hor.dias[iso], card = el('div', 'hday' + (iso === hoy ? ' hoy' : '') + (!info || info.festivo ? ' off' : ''));
+    const dh = el('div', 'hdh'); dh.append(el('b', null, fmt(iso, { weekday: 'long' })), el('span', null, fmt(iso, { day: 'numeric', month: 'short' }))); card.append(dh);
+    if (!info) card.append(el('div', 'hnone', 'Fuera del calendario'));
+    else if (info.festivo) card.append(el('div', 'hnone', info.festivo));
+    else for (let b = 0; b < nB; b++) {
+      const bl = info.bloques.length === 1 ? info.bloques[0] : info.bloques[b], row = el('div', 'hbl'); row.append(el('small', null, hor.franjas[b] || `Bloque ${b + 1}`));
+      if (!bl) row.append(el('div', 'hnone', 'Sin clase'));
+      else { const c = el('div', 'hcls'); c.style.setProperty('--c', COLOR[bl.sigla.toLowerCase()] || 'var(--acc)'); c.title = NOMBRES[bl.sigla.toLowerCase()] || bl.sigla; c.append(el('b', null, bl.sigla)); if (bl.extra) c.append(document.createTextNode(' ' + bl.extra)); if (bl.on) c.append(el('span', 't', 'online')); row.append(c); }
+      card.append(row);
+    }
+    for (const i of pend.filter(x => x.fecha === iso)) card.append(el('div', 'hent', `📌 ${i.sigla} · ${i.titulo}`));
+    grid.append(card);
+  }
+  doc.append(grid, el('p', 'dsub', `Fuente: ${hor.fuente} (solo lectura). 📌 = entregas pendientes de esa semana, del dashboard.`)); doc.scrollTop = keep;
+}
 // ---- Ingesta de lo nuevo del campus (Blackboard, Moodle, Canvas o calendario iCal): ficheros → _entrada, notas/estados → Brain, redacción → Claude ----
 // Panel dentro de Avisos (debajo de las novedades). El estado vive en `ing`, así sobrevive a los redibujados de la pantalla.
 const fmtTam = (b) => !b ? '' : b >= 1073741824 ? (b / 1073741824).toFixed(1).replace('.', ',') + ' GB' : (Math.round(b / 1048576) || 1) + ' MB';
