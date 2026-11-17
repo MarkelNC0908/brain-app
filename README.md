@@ -11,10 +11,10 @@ Están en la sección **Releases** (columna derecha de este repositorio), no en 
 
 | Sistema | Fichero |
 |---|---|
-| macOS (Apple Silicon) | `Brain-U-tad-macos-arm64.zip` |
-| Windows 10/11 (x64) | `Brain-U-tad-windows-x64.zip` |
-| Linux (x64) | `Brain-U-tad-linux-x64.zip` |
-| Android 7+ | `Brain-U-tad-android.apk` |
+| macOS (Apple Silicon) | `Brain-macos-arm64.zip` |
+| Windows 10/11 (x64) | `Brain-windows-x64.zip` |
+| Linux (x64) | `Brain-linux-x64.zip` |
+| Android 7+ | `Brain-android.apk` |
 
 ## Instalar y abrir
 - **macOS:** descomprime y arrastra la app a Aplicaciones. La primera vez: clic derecho sobre la app → **Abrir** → Abrir.
