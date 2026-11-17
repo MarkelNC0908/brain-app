@@ -3,6 +3,10 @@
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:transparent;color:var(--fg);font:14px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;-webkit-font-smoothing:antialiased}
 button,input,select{font:inherit;color:inherit}
+/* controles nativos (desplegables, casillas, barras) con el tema claro/oscuro del sistema; sin esto en Windows salen blanco sobre blanco */
+:root{color-scheme:light dark}
+button{background:var(--hover)}button:disabled{opacity:.4}
+select option,select optgroup{background:var(--bg);color:var(--fg)}
 #app{display:flex;height:100vh}
 /* barra lateral (translúcida con vibrancy) */
 #side{width:256px;flex:none;display:flex;flex-direction:column;background:transparent}
@@ -162,3 +166,5 @@ body:not([data-os=darwin]) #bar{height:40px}
 
 .ov.arriba{z-index:90}.pcard:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .sub{margin:6px 10px 2px 22px;padding:2px 0;font-size:11px;color:var(--mut);cursor:pointer;user-select:none}.sub::before{content:'▸ '}.sub.open::before{content:'▾ '}.sub:hover{color:var(--acc)}
+
+.ing button{border:0;border-radius:7px;padding:4px 12px;background:var(--sel);color:var(--acc);cursor:pointer;font-size:12px}.ing button.pri{background:var(--acc);color:#fff}.ing button:disabled{opacity:.4;cursor:default}
