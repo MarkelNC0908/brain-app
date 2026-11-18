@@ -35,8 +35,8 @@ async function load() {
   byBase = new Map(); for (const n of notes) { const k = norm(n.base); if (!byBase.has(k)) byBase.set(k, n); }
   for (const n of notes) n.hay = norm(n.title + '\n' + n.body);
   q.value ? search(q.value) : buildTree();
-  loadDash(); loadBB(); if (!statusIniciado) { statusIniciado = true; refreshStatus(); }   // primer chequeo del LED aunque no haya llegado ningún evento de sincronización
-  if (view === 'dash' || view === 'study' || view === 'avisos' || view === 'horario') {} else if (current && byPath.has(current)) show(current); else if (!current) home();
+  loadDash(); loadBB(); loadMsgs(); if (!statusIniciado) { statusIniciado = true; refreshStatus(); }   // primer chequeo del LED aunque no haya llegado ningún evento de sincronización
+  if (view === 'dash' || view === 'study' || view === 'avisos' || view === 'horario' || view === 'mensajes') {} else if (current && byPath.has(current)) show(current); else if (!current) home();
 }
 
 function buildTree() {
@@ -67,7 +67,7 @@ function go(p) {
   const nn = byPath.get(p); if (nn && nn.externo) { window.brain.openFile(p); return; }   // PDF, Word… se abren con su aplicación
   hist = hist.slice(0, hp + 1); hist.push(p); hp = hist.length - 1; show(p); }
 function goSubject(s) { hist = hist.slice(0, hp + 1); hist.push('@' + s); hp = hist.length - 1; subject(s); }
-function nav(d) { const i = hp + d; if (i < 0 || i >= hist.length) return; hp = i; const h = hist[hp]; h === '@study' ? showStudy(false) : h === '@dash' ? showDash(false) : h === '@avisos' ? showAvisos(false) : h === '@horario' ? showHorario(false) : h === '@home' ? home() : h[0] === '@' ? subject(h.slice(1)) : show(h); }
+function nav(d) { const i = hp + d; if (i < 0 || i >= hist.length) return; hp = i; const h = hist[hp]; h === '@study' ? showStudy(false) : h === '@dash' ? showDash(false) : h === '@avisos' ? showAvisos(false) : h === '@mensajes' ? showMensajes(false) : h === '@horario' ? showHorario(false) : h === '@home' ? home() : h[0] === '@' ? subject(h.slice(1)) : show(h); }
 const btns = () => { $('#back').disabled = hp <= 0; $('#fwd').disabled = hp >= hist.length - 1; };
 
 function resolve(target) {
@@ -380,6 +380,8 @@ $('#g-go').onclick = () => { const m = pendingMove; gm.hidden = true; pendingMov
 $('#g-nota').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#g-go').click(); if (e.key === 'Escape') $('#g-cancel').click(); });
 $('#dbtn').onclick = () => { dashMsg = null; showDash(); };
 $('#hobtn').onclick = () => showHorario();
+$('#msgbtn').onclick = () => showMensajes();
+window.brain.onMensajesChanged(loadMsgs); window.brain.onMensajes(() => showMensajes());
 // ---- Horario: semana por días y franjas, leído de 01-Curso/calendario*.md (celdas «AAAA-MM-DD SIGLA») y de las franjas «Bloque 1: 17:30 – 20:00» de 01-Curso/curso.md. Solo lectura ----
 // <parse-horario>
 const isoDe = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -455,6 +457,92 @@ function drawHorario() {
     grid.append(card);
   }
   doc.append(grid, el('p', 'dsub', `Fuente: ${hor.fuente} (solo lectura). 📌 = entregas pendientes de esa semana, del dashboard.`)); doc.scrollTop = keep;
+}
+// ---- Mensajes privados de Blackboard (solo escritorio): una sección por asignatura con sus conversaciones, como «Mensajes» del campus. Solo lectura ----
+let msgs = null, msgLeyendo = false, msgHilo = null;   // msgHilo = conversación abierta ({ courseId, convId, titulo, cargando, error, data })
+const fechaMsg = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }); };
+function updateMsgBtn() { const b = $('#msgbtn'); if (!b) return; b.replaceChildren(document.createTextNode('💬 Mensajes')); if (msgs && msgs.sinLeer) b.append(el('b', null, String(msgs.sinLeer))); }
+async function loadMsgs() {
+  try { msgs = await window.brain.mensajesState(); } catch { msgs = null; }
+  if (msgs && (msgs.ok === false || !msgs.status)) msgs = null;   // en el móvil no hay mensajes: el botón va oculto
+  updateMsgBtn(); if (view === 'mensajes') drawMensajes();
+}
+async function refrescaMsgs() {
+  if (msgLeyendo) return; msgLeyendo = true; drawMensajes();
+  try { const r = await window.brain.mensajesCheck(); if (r && r.status) msgs = r; } catch {}
+  msgLeyendo = false; updateMsgBtn(); if (view === 'mensajes') drawMensajes();
+}
+function showMensajes(push = true) {
+  view = 'mensajes'; current = null; msgHilo = null;
+  if (push && hist[hp] !== '@mensajes') { hist = hist.slice(0, hp + 1); hist.push('@mensajes'); hp = hist.length - 1; }
+  $('#crumb').textContent = 'Mensajes'; btns(); markOn(); drawMensajes();
+  loadMsgs().then(() => { if (msgs && !['no-aplica', 'sin-campus', 'login'].includes(msgs.status) && (!msgs.lastCheck || Date.now() - new Date(msgs.lastCheck) > 5 * 60000)) refrescaMsgs(); });   // al abrir: lo guardado al instante y, si tiene más de 5 min, se vuelve a leer
+}
+function drawMensajes() {
+  if (msgHilo && msgs) return drawHilo();
+  const keep = doc.scrollTop; doc.replaceChildren(); $('#crumb').textContent = 'Mensajes';
+  const head = el('div', 'dh'); head.append(el('h1', null, 'Mensajes')); doc.append(head);
+  if (!msgs) { doc.append(el('p', 'dsub', 'Los mensajes de Blackboard solo están en la app de escritorio.')); return; }
+  const box = el('div', 'av'), h = el('div', 'bbhead'), st = msgs.status;
+  const cls = msgLeyendo ? 'busy' : st === 'ok' ? 'ok' : ['login', 'nunca', 'sin-campus', 'no-aplica'].includes(st) ? 'warn' : 'err';
+  const hora = msgs.lastCheck ? ' · revisado ' + new Date(msgs.lastCheck).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '';
+  h.append(el('i', 'led ' + cls), el('b', null, 'Blackboard'), document.createTextNode(msgLeyendo ? (msgs.msg || 'Leyendo…') : msgs.msg + hora));
+  if (!['no-aplica', 'sin-campus'].includes(st)) {
+    const bAct = el('button', null, msgLeyendo ? 'Leyendo…' : 'Actualizar'); bAct.disabled = msgLeyendo; bAct.onclick = refrescaMsgs; h.append(bAct);
+    if (st === 'login' || st === 'nunca') { const bL = el('button', null, 'Iniciar sesión en Blackboard'); bL.onclick = () => window.brain.mensajesLogin(); h.append(bL); }
+  }
+  box.append(h); doc.append(box);
+  const cursos = [...(msgs.cursos || [])], ult = (c) => (c.conversaciones[0] && c.conversaciones[0].actualizada) || '';
+  const con = cursos.filter(c => c.conversaciones.length).sort((a, b) => ult(b).localeCompare(ult(a))), sin = cursos.filter(c => !c.conversaciones.length);
+  for (const c of con) {
+    const sec = el('div', 'msg-cur'), hd = el('div', 'msg-h'); hd.style.setProperty('--c', COLOR[c.sigla.toLowerCase()] || 'var(--acc)');
+    hd.append(el('i'), el('b', null, NOMBRES[c.sigla.toLowerCase()] || (c.nombre || '').replace(/\s*\([^)]*\)\s*$/, '') || c.sigla), el('span', 'msg-n', `${c.conversaciones.length} conversación(es)`));
+    if (c.sinLeer) hd.append(el('span', 'msg-un', `${c.sinLeer} sin leer`));
+    const ab = el('button', null, 'Abrir en Blackboard ↗'); ab.onclick = () => window.brain.external(`${msgs.campus}/ultra/courses/${c.courseId}/messages`); hd.append(ab); sec.append(hd);
+    for (const v of c.conversaciones) {
+      const r = el('div', 'msg-row' + (v.leido ? '' : ' nw')), top = el('div', 'msg-top');
+      top.append(el('b', null, v.remitente || '(sin remitente)'), el('span', null, fechaMsg(v.fecha)), el('span', 't', v.aTodos ? 'Para: todos los miembros del curso' : 'Mensaje directo'));
+      if (v.total > 1) top.append(el('span', 't', `${v.total} mensajes en la conversación`));
+      r.append(top, el('div', 'msg-txt', v.texto || '(sin texto)')); r.title = v.leido ? 'Ver la conversación completa' : 'Ver la conversación completa (Blackboard la marcará como leída, igual que si la abres allí)'; r.onclick = () => abrirHilo(c, v); sec.append(r);
+    }
+    if (c.hayMas) sec.append(el('div', 'dsub', 'Hay más conversaciones en Blackboard que no se han descargado.'));
+    if (c.sinRespuesta) sec.append(el('div', 'dsub', 'Blackboard no respondió en la última lectura: se muestra lo guardado.'));
+    doc.append(sec);
+  }
+  if (!con.length && !msgLeyendo && cursos.length) doc.append(el('p', 'dsub', 'No hay conversaciones guardadas todavía. Pulsa «Actualizar».'));
+  if (sin.length) doc.append(el('p', 'dsub', 'Sin mensajes: ' + sin.map(c => c.sigla).join(', ')));
+  doc.append(el('p', 'dsub', 'Se muestra el último mensaje de cada conversación, como en la lista de Blackboard; pulsa una para ver el historial completo. Solo lectura: no se responde ni se borra nada; al abrir una conversación sin leer, Blackboard la marca como leída, igual que si la abres en el campus. Los mensajes se guardan solo en tu equipo (carpeta de datos de la app), fuera del Brain y de Git.'));
+  doc.scrollTop = keep;
+}
+async function abrirHilo(c, v, forzar) {
+  const nom = NOMBRES[c.sigla.toLowerCase()] || (c.nombre || '').replace(/\s*\([^)]*\)\s*$/, '') || c.sigla;
+  msgHilo = { courseId: c.courseId, convId: v.id, titulo: `${nom} · ${v.remitente || 'conversación'}`, cargando: true }; drawMensajes();
+  let r; try { r = await window.brain.mensajesHilo(c.courseId, v.id, v.total, !!forzar); } catch (e) { r = { ok: false, msg: String(e.message || e) }; }
+  if (!msgHilo || msgHilo.convId !== v.id) return;   // mientras tanto saliste de la conversación
+  msgHilo = r && r.ok ? { ...msgHilo, cargando: false, data: r } : { ...msgHilo, cargando: false, error: (r && r.msg) || 'No se pudo abrir la conversación', login: !!(r && r.login) };
+  loadMsgs();   // los contadores de no leídos cambian al abrirla
+}
+function drawHilo() {
+  const keep = doc.scrollTop, H = msgHilo; doc.replaceChildren(); $('#crumb').textContent = 'Mensajes';
+  const head = el('div', 'dh'); head.append(el('h1', null, 'Conversación')); doc.append(head);
+  const bar = el('div', 'bbhead'), back = el('button', null, '‹ Volver a Mensajes'); back.onclick = () => { msgHilo = null; drawMensajes(); };
+  const ab = el('button', null, 'Abrir en Blackboard ↗'); ab.onclick = () => window.brain.external(`${msgs.campus}/ultra/courses/${H.courseId}/messages/edit/${H.convId}?courseId=${H.courseId}&offset=0&count=3`);
+  bar.append(back, el('b', null, H.titulo), ab); doc.append(bar);
+  if (H.cargando) { doc.append(el('p', 'dsub', 'Abriendo la conversación en Blackboard… puede tardar unos segundos.')); return; }
+  if (H.error) {
+    doc.append(el('p', 'dsub', H.error)); const b = el('button', null, H.login ? 'Iniciar sesión en Blackboard' : 'Reintentar');
+    b.onclick = () => (H.login ? window.brain.mensajesLogin() : abrirHilo({ courseId: H.courseId, sigla: '', nombre: H.titulo.split(' · ')[0] }, { id: H.convId, remitente: H.titulo.split(' · ').slice(1).join(' · ') }, true)); doc.append(b); return;
+  }
+  const d = H.data;
+  if (d.participantes && d.participantes.length) doc.append(el('p', 'dsub', 'Personas en la conversación: ' + d.participantes.join(', ')));
+  for (const m of d.mensajes) {
+    const bub = el('div', 'msg-bub' + (m.leido ? '' : ' nw')), top = el('div', 'msg-top');
+    top.append(el('b', null, m.remitente || '(sin remitente)'), el('span', null, fechaMsg(m.fecha))); bub.append(top, el('div', 'msg-full', m.texto || '(sin texto)')); doc.append(bub);
+  }
+  if (d.hayMas) doc.append(el('p', 'dsub', 'Hay más mensajes en Blackboard que no se han descargado.'));
+  const f = el('div', 'bbhead'), ref = el('button', null, 'Volver a leer'); ref.onclick = () => abrirHilo({ courseId: H.courseId, sigla: '', nombre: H.titulo.split(' · ')[0] }, { id: H.convId, remitente: H.titulo.split(' · ').slice(1).join(' · ') }, true);
+  f.append(document.createTextNode(`${d.mensajes.length} mensaje(s) · ${d.deCache ? 'guardado en tu equipo' + (d.leidoEn ? ' el ' + fechaMsg(d.leidoEn) : '') : 'leído ahora de Blackboard'}`), ref); doc.append(f);
+  doc.scrollTop = keep;
 }
 // ---- Ingesta de lo nuevo del campus (Blackboard, Moodle, Canvas o calendario iCal): ficheros → _entrada, notas/estados → Brain, redacción → Claude ----
 // Panel dentro de Avisos (debajo de las novedades). El estado vive en `ing`, así sobrevive a los redibujados de la pantalla.

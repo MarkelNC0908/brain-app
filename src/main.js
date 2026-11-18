@@ -3,7 +3,8 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Menu, Notification, nativeTh
 const fs = require('fs');
 const dashboard = require('./dashboard');
 const L = require('./layout');
-const campusMod = require('./campus');   // elige el conector según el campus del perfil
+const campusMod = require('./campus');
+const mensajesMod = require('./mensajes');   // mensajes privados de Blackboard (solo lectura)   // elige el conector según el campus del perfil
 let cur = campusMod.para('blackboard');   // { avisos, ingesta } del perfil activo
 const profiles = require('./profiles');
 const cursosMod = require('./cursos');
@@ -124,6 +125,14 @@ function avisarEntregas() {
   try { fs.writeFileSync(avisosFile(), JSON.stringify([...set].slice(-300))); } catch {}
 }
 const revisarBB = (silencioso) => cur.avisos.check({ onClick: abrirAvisos, silencioso }).then(r => { if (win && !win.isDestroyed()) win.webContents.send('bb:changed'); return r; });
+const abrirMensajes = () => { if (!win || win.isDestroyed()) return; if (win.isMinimized()) win.restore(); win.show(); win.focus(); win.webContents.send('ui:mensajes'); };
+const avisaMensajes = () => { if (win && !win.isDestroyed()) win.webContents.send('msg:changed'); };
+// segundo plano: solo los contadores de no leídos (1 carga de página); la lista completa se lee al abrir «Mensajes»
+const revisarMensajes = (silencioso) => mensajesMod.check({ soloResumen: true, silencioso, onClick: abrirMensajes }).then(r => { avisaMensajes(); return r; });
+ipcMain.handle('msg:state', () => mensajesMod.state());
+ipcMain.handle('msg:check', (e) => (fromWin(e) ? mensajesMod.check({ silencioso: true, onCambio: avisaMensajes }).then(r => { avisaMensajes(); return r; }) : null));   // lectura completa, la pide la pantalla
+ipcMain.handle('msg:hilo', (e, courseId, convId, total, forzar) => (fromWin(e) ? mensajesMod.hilo(String(courseId), String(convId), Number(total) || 1, !!forzar).then(r => { avisaMensajes(); return r; }) : { ok: false, msg: 'No permitido' }));
+ipcMain.handle('msg:login', (e) => { if (fromWin(e)) mensajesMod.abrir(() => { mensajesMod.check({ silencioso: true, onCambio: avisaMensajes }).then(avisaMensajes); }); });
 ipcMain.handle('bbi:scan', (e) => (fromWin(e) && vault ? cur.ingesta.escanear(vault, hoyISO()) : { ok: false, msg: 'No permitido' }));
 ipcMain.handle('bbi:apply', (e, f, c, d) => (fromWin(e) && vault ? cur.ingesta.aplicar(vault, hoyISO(), Array.isArray(f) ? f : [], Array.isArray(c) ? c : [], Array.isArray(d) ? d : []) : { ok: false, msg: 'No permitido' }));
 ipcMain.handle('bbi:cancel', (e) => { if (fromWin(e)) cur.ingesta.cancelar(); });
@@ -139,9 +148,10 @@ function activar(p) {
   cur = campusMod.para(profiles.tipoDe(p));
   cur.avisos.init({ campus: p.campusUrl, icalUrl: p.icalUrl || '', partition: d.partition, stateFile: d.bbState, asignaturas: asig });
   cur.ingesta.init({ campus: p.campusUrl, icalUrl: p.icalUrl || '', partition: d.partition, ingestaFile: d.bbIngesta });
+  mensajesMod.init({ activo: profiles.tipoDe(p) === 'blackboard', campus: p.campusUrl, partition: d.partition, stateFile: d.mensajes, asignaturas: asig });
   cur.ingesta.setProgreso(prog => { if (win && !win.isDestroyed()) win.webContents.send('bbi:progress', prog); });   // progreso de descargas grandes (vídeos)
   setVault(p.vault);
-  timers.push(setTimeout(() => { avisarEntregas(); revisarBB(false); }, 20000), setInterval(avisarEntregas, 60 * 60 * 1000), setInterval(() => revisarBB(false), 30 * 60 * 1000));
+  timers.push(setTimeout(() => { avisarEntregas(); revisarBB(false); }, 20000), setTimeout(() => revisarMensajes(true), 60000), setInterval(avisarEntregas, 60 * 60 * 1000), setInterval(() => revisarBB(false), 30 * 60 * 1000), setInterval(() => revisarMensajes(false), 30 * 60 * 1000));
   lanzaSync();
 }
 // git pull del perfil recién activado; si la ventana aún no ha cargado se llama desde did-finish-load
