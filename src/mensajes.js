@@ -20,6 +20,7 @@ function init(ctx) {
   if (loginWin && !loginWin.isDestroyed()) loginWin.destroy();
   if (!ctx.activo) { st.status = 'no-aplica'; st.msg = 'Los mensajes privados solo están disponibles con un campus Blackboard'; return; }
   try { st = { ...st, ...JSON.parse(fs.readFileSync(ctx.stateFile, 'utf8')) }; } catch {}
+  if (st.fmt !== 2) { st.hilos = {}; st.lastCheck = null; st.fmt = 2; save(); }   // v1.0.10 guardaba «GIVEN_NAME» como nombre: se descarta y se vuelve a leer
   if (!ctx.campus) { st.status = 'sin-campus'; st.msg = 'Añade la URL de tu campus en el perfil para ver tus mensajes'; }
 }
 
@@ -27,7 +28,13 @@ function init(ctx) {
 const limpia = (s) => String(s || '').replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>/gi, '\n').replace(/<[^>]+>/g, '')
   .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
   .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000);   // en pantalla se pinta como texto plano, nunca como HTML
-const nombre = (s) => (s ? (s.preferredDisplayName || [s.givenName, s.familyName].filter(Boolean).join(' ') || s.userName || '') : '');
+// OJO: en Blackboard `preferredDisplayName` NO es el nombre, es la preferencia de visualización (valores como «GIVEN_NAME»): se usan nombre y apellidos
+const nombre = (s) => {
+  if (!s) return '';
+  const n = [s.givenName, s.familyName].filter(Boolean).join(' ').trim(); if (n) return n;
+  const p = String(s.preferredDisplayName || '').trim(); if (p && !/^[A-Z][A-Z_]*$/.test(p)) return p;   // solo si parece un nombre y no un código de preferencia
+  return s.userName || '';
+};
 const siglaDe = (curso) => { const s = siglaDeCurso(curso || '', cfg.asignaturas ? cfg.asignaturas() : []); return s ? s.toUpperCase() : (String(curso || '').replace(/\([^)]*\)/g, '').trim().slice(0, 14) || '·'); };
 
 // ---- Captura de las respuestas de la página (protocolo de depuración de la ventana oculta) ----
@@ -192,4 +199,4 @@ function abrir(onClosed) {
   loginWin.loadURL(cfg.campus + '/ultra/messages');
   loginWin.on('closed', () => { loginWin = null; if (onClosed) onClosed(); });
 }
-module.exports = { init, check, state, abrir, hilo, _limpia: limpia };
+module.exports = { init, check, state, abrir, hilo, _limpia: limpia, _nombre: nombre };
