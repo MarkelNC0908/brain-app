@@ -19,7 +19,7 @@ function buildCards() {
   const list = [];
   for (const n of notes) {
     let skip = false;
-    for (const l of n.body.split('\n')) {
+    for (const l of n.body.split(/\r?\n/)) {
       if (/^#{1,4}\s/.test(l)) { skip = /^#{1,4}\s*(Dudas|Fuentes|Relaci[oó]n con la evaluaci)/i.test(l); continue; }
       if (skip) continue;
       // Formato del Brain («- SIGLA, término: definición») o apuntes corrientes («- **término**: definición», «- Término: definición», «**Término**: definición»)

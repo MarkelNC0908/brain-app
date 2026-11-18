@@ -6,7 +6,7 @@ A._fetch(async()=>({ok:true,status:200,json:async()=>({})}));
 const kf=path.join(os.tmpdir(),'ia-k-'+Date.now()+'.json');let ok=0,ko=0;const t=(n,c)=>{c?ok++:(ko++,console.log('FALLA',n))};
 (async()=>{A.init({keyFile:kf});
  let r=await A.guardarClave('Z'.repeat(30));t('persistente',r.ok&&r.persistente===true);
- const raw=fs.readFileSync(kf,'utf8');t('no en claro',!raw.includes('ZZZZ')&&(fs.statSync(kf).mode&0o777)===0o600);
+ const raw=fs.readFileSync(kf,'utf8');t('no en claro',!raw.includes('ZZZZ')&&(process.platform==='win32'||(fs.statSync(kf).mode&0o777)===0o600));
  A.init({keyFile:kf});let e=await A.estado();t('sobrevive al reinicio',e.gemini.clave===true&&e.gemini.cifrada===true);
  A.quitarClave();A.init({keyFile:kf});e=await A.estado();t('quitada del disco',e.gemini.clave===false&&!fs.existsSync(kf));
  console.log('ok',ok,'ko',ko);process.exit(0)})();

@@ -53,6 +53,7 @@ function walk(dir, rel, out) {
 function buildIndex() {
   realPaths.clear();
   const mk = (rel, raw, sigla, abs, externo) => {
+    raw = String(raw).replace(/\r\n?/g, '\n');   // apuntes con saltos de línea de Windows (CRLF): se normalizan para que definiciones, tarjetas y búsqueda funcionen igual en todos los sistemas
     const { meta, body } = parseFrontmatter(raw), h1 = body.match(/^#\s+(.+)$/m), base = path.basename(rel, path.extname(rel));
     return { path: rel, base, ext: path.extname(rel).slice(1), title: meta.title || (h1 && h1[1]) || base, sigla: sigla.toUpperCase(), type: meta.type || '', updated: meta.updated || '', meta, body, externo: !!externo, borrador: /NO sale de las diapositivas del profesor/.test(body) };   // borrador = apunte escrito sin material de clase (marca fija en la nota)
   };

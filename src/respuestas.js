@@ -19,7 +19,7 @@ const RESP = (() => {
       if (!n || !n.body || (S && String(n.sigla).toUpperCase() !== S)) continue;
       let cab = '', buf = '';
       const cierra = () => { const t = buf.trim(); if (t.length > 40) out.push({ path: n.path, titulo: tituloDe(n), sigla: String(n.sigla).toUpperCase(), cab, texto: t, borrador: !!n.borrador }); buf = ''; };
-      for (const l of n.body.split('\n')) {
+      for (const l of n.body.split(/\r?\n/)) {
         const h = l.match(/^#{1,4}\s+(.*)$/);
         if (h) { cierra(); cab = h[1].replace(/[*`]/g, '').trim(); continue; }
         if (buf.length > 1500 && l.trim() === '') cierra(); else buf += l + '\n';
@@ -46,7 +46,7 @@ const RESP = (() => {
     for (const n of notes) {
       if (!n || !n.body || (S && String(n.sigla).toUpperCase() !== S)) continue;
       let skip = false;
-      for (const l of n.body.split('\n')) {
+      for (const l of n.body.split(/\r?\n/)) {
         if (/^#{1,4}\s/.test(l)) { skip = /^#{1,4}\s*(Dudas|Fuentes|Relaci[oó]n con la evaluaci)/i.test(l); continue; }
         if (skip) continue;
         let m = l.match(/^-\s*[A-Z]{2,4},\s*([^:]{2,90}):\s*(.{20,})$/);
@@ -63,7 +63,7 @@ const RESP = (() => {
   }
   // Extracto de un trozo: las líneas que más palabras de la pregunta contienen (en su orden), con «…» entre saltos
   function extracto(texto, consulta, max = 650) {
-    const Q = new Set(toks(consulta)), ls = String(texto).split('\n').map(l => l.trim()).filter(Boolean);
+    const Q = new Set(toks(consulta)), ls = String(texto).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const sc = ls.map(l => toks(l).filter(t => Q.has(t)).length);
     const orden = sc.map((s, i) => [s, i]).filter(x => x[0] > 0).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
     const idx = new Set(); let tam = 0;

@@ -1,0 +1,6 @@
+# Fin de línea LF en el repositorio; los ejemplos de las pruebas, siempre LF (sus expresiones lo esperan)
+* text=auto
+test/fixtures/** text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.css text eol=lf
