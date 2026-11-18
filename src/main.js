@@ -132,6 +132,14 @@ const revisarMensajes = (silencioso) => mensajesMod.check({ soloResumen: true, s
 ipcMain.handle('msg:state', () => mensajesMod.state());
 ipcMain.handle('msg:check', (e) => (fromWin(e) ? mensajesMod.check({ silencioso: true, onCambio: avisaMensajes }).then(r => { avisaMensajes(); return r; }) : null));   // lectura completa, la pide la pantalla
 ipcMain.handle('msg:hilo', (e, courseId, convId, total, forzar) => (fromWin(e) ? mensajesMod.hilo(String(courseId), String(convId), Number(total) || 1, !!forzar).then(r => { avisaMensajes(); return r; }) : { ok: false, msg: 'No permitido' }));
+ipcMain.handle('msg:dest', (e, courseId, q) => (fromWin(e) ? mensajesMod.destinatarios(String(courseId), String(q || '')) : { ok: false, msg: 'No permitido' }));
+ipcMain.handle('msg:red-cerrar', (e) => { if (fromWin(e)) mensajesMod.redaccionCerrar(); });
+ipcMain.handle('msg:enviar', async (e, d) => {   // solo desde la ventana de la app, con lo que el usuario ha confirmado en pantalla
+  if (!fromWin(e)) return { ok: false, enviado: false, msg: 'No permitido' };
+  const r = await mensajesMod.enviar(d && typeof d === 'object' ? { courseId: String(d.courseId), destinatarios: d.destinatarios, texto: d.texto, copia: !!d.copia } : null);
+  if (r.enviado === true || r.enviado === 'desconocido') mensajesMod.check({ silencioso: true, onCambio: avisaMensajes }).then(avisaMensajes);   // se vuelve a leer la lista para ver el mensaje nuevo
+  return r;
+});
 ipcMain.handle('msg:login', (e) => { if (fromWin(e)) mensajesMod.abrir(() => { mensajesMod.check({ silencioso: true, onCambio: avisaMensajes }).then(avisaMensajes); }); });
 ipcMain.handle('bbi:scan', (e) => (fromWin(e) && vault ? cur.ingesta.escanear(vault, hoyISO()) : { ok: false, msg: 'No permitido' }));
 ipcMain.handle('bbi:apply', (e, f, c, d) => (fromWin(e) && vault ? cur.ingesta.aplicar(vault, hoyISO(), Array.isArray(f) ? f : [], Array.isArray(c) ? c : [], Array.isArray(d) ? d : []) : { ok: false, msg: 'No permitido' }));

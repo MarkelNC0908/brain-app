@@ -7,6 +7,7 @@
 const { BrowserWindow, Notification } = require('electron');
 const fs = require('fs');
 const { siglaDeCurso } = require('./cursos');
+const { DRIVER } = require('./bbcompose');
 
 let cfg = null, st = vacio(), running = null, loginWin = null;
 function vacio() { return { status: 'nunca', msg: 'Sin revisar todavía', lastCheck: null, cursos: [] }; }
@@ -151,6 +152,111 @@ async function hilo(courseId, convId, total, forzar) {
   hilosLeyendo.set(k, pr); return pr;
 }
 
+// ---- Mensajes nuevos: se maneja la pantalla «Nuevo mensaje» de Blackboard en una ventana oculta, como lo haría una persona ----
+// Nada se envía por una API propia: se rellena el formulario real y se pulsa su botón «Enviar» SOLO después de comprobar que los
+// destinatarios y el texto que muestra Blackboard son exactamente los que ha confirmado el usuario. Si algo no cuadra, se aborta.
+const norm = (t) => String(t || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
+const dormir = (ms) => new Promise(r => setTimeout(r, ms));
+const js = (win, code) => win.webContents.executeJavaScript(code, true);
+const MAX_TEXTO = 5000, MAX_DEST = 30;
+function ventanaOculta() { return new BrowserWindow({ show: false, webPreferences: { partition: cfg.partition, contextIsolation: true, sandbox: true, nodeIntegration: false } }); }
+
+// Abre la redacción del curso y espera a que el formulario esté listo. A veces Blackboard manda primero a «Actividad»: se reintenta.
+async function abrirRedaccion(win, courseId) {
+  const url = `${cfg.campus}/ultra/courses/${courseId}/messages/create?courseId=${courseId}&allowReplies=0`;
+  let intentos = 0; win.loadURL(url).catch(() => {});
+  const t0 = Date.now(); let ultimaCarga = t0;
+  while (Date.now() - t0 < 40000) {
+    const u = win.webContents.getURL();
+    if (!enCampus(u)) { if (Date.now() - t0 > 8000) return { login: true }; }
+    else if (/\/messages\/create/.test(u)) { try { await js(win, DRIVER); if (await js(win, 'window.__bbc.listo()')) return { ok: true }; } catch {} }
+    else if (intentos < 2 && Date.now() - ultimaCarga > 3500) { intentos++; ultimaCarga = Date.now(); win.loadURL(url).catch(() => {}); }
+    await dormir(600);
+  }
+  return { vacio: true };
+}
+
+// Sesión de redacción abierta mientras el usuario busca destinatarios (se cierra al salir del formulario o a los 4 minutos sin uso)
+let red = null;
+function redaccionCerrar() { if (red) { clearTimeout(red.timer); try { if (!red.win.isDestroyed()) red.win.destroy(); } catch {} red = null; } }
+async function redaccionAbrir(courseId) {
+  if (red && red.courseId === courseId && !red.win.isDestroyed()) { clearTimeout(red.timer); red.timer = setTimeout(redaccionCerrar, 4 * 60000); return { ok: true }; }
+  redaccionCerrar();
+  const win = ventanaOculta(), r = await abrirRedaccion(win, courseId);
+  if (!r.ok) { if (!win.isDestroyed()) win.destroy(); return r; }
+  red = { win, courseId, timer: setTimeout(redaccionCerrar, 4 * 60000) }; return { ok: true };
+}
+let buscando = Promise.resolve();
+async function destinatarios(courseId, consulta) {
+  if (!cfg || !cfg.activo || !cfg.campus) return { ok: false, msg: 'Mensajes no disponibles en este perfil' };
+  const q = String(consulta || '').trim().slice(0, 60);
+  if (!ID.test(String(courseId))) return { ok: false, msg: 'Asignatura no válida' };
+  if (q.length < 2) return { ok: true, resultados: [] };
+  const turno = buscando.then(async () => {   // de una en una: la redacción solo tiene un cuadro de búsqueda
+    const o = await redaccionAbrir(courseId);
+    if (o.login) return { ok: false, login: true, msg: 'Inicia sesión en Blackboard' };
+    if (!o.ok) return { ok: false, msg: 'Blackboard no abrió la redacción de mensajes (¿cambió la página?)' };
+    try { const lista = await js(red.win, `window.__bbc.buscar(${JSON.stringify(q)})`); return { ok: true, resultados: (lista || []).map(x => ({ id: String(x.id), nombre: x.nombre, usuario: x.usuario, rol: x.rol })).filter(x => ID.test(x.id) && x.nombre) }; }
+    catch (e) { redaccionCerrar(); return { ok: false, msg: 'Error al buscar: ' + String(e.message || e).slice(0, 100) }; }
+  });
+  buscando = turno.catch(() => {}); return turno;
+}
+
+// Escribe el texto con eventos de teclado reales (el editor de Blackboard no acepta bien execCommand): una línea = un párrafo
+async function teclear(win, texto) {
+  const dbg = win.webContents.debugger; try { dbg.attach('1.3'); } catch {}
+  await dbg.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});
+  const enter = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
+  const lineas = String(texto).replace(/\r/g, '').split('\n');
+  for (let k = 0; k < lineas.length; k++) {
+    if (k) { await dbg.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', ...enter, text: '\r' }); await dbg.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...enter }); }
+    if (lineas[k]) await dbg.sendCommand('Input.insertText', { text: lineas[k] });
+    await dormir(60);
+  }
+}
+let enviando = false;
+// enviar({ courseId, destinatarios: [{ id, nombre }], texto, copia }) → { ok, enviado: true|false|'desconocido', msg }
+async function enviar(d) {
+  if (!cfg || !cfg.activo || !cfg.campus) return { ok: false, enviado: false, msg: 'Mensajes no disponibles en este perfil' };
+  const texto = String((d && d.texto) || '').replace(/\r/g, '').trim(), dest = Array.isArray(d && d.destinatarios) ? d.destinatarios : [];
+  if (!d || !ID.test(String(d.courseId))) return { ok: false, enviado: false, msg: 'Asignatura no válida' };
+  if (!dest.length || dest.length > MAX_DEST || !dest.every(x => x && ID.test(String(x.id)) && typeof x.nombre === 'string' && x.nombre.trim() && x.nombre.length < 120)) return { ok: false, enviado: false, msg: `Elige entre 1 y ${MAX_DEST} destinatarios` };
+  if (new Set(dest.map(x => x.id)).size !== dest.length) return { ok: false, enviado: false, msg: 'Hay destinatarios repetidos' };
+  if (!texto) return { ok: false, enviado: false, msg: 'El mensaje está vacío' };
+  if (texto.length > MAX_TEXTO) return { ok: false, enviado: false, msg: `El mensaje supera los ${MAX_TEXTO} caracteres` };
+  if (enviando) return { ok: false, enviado: false, msg: 'Ya hay un envío en curso' };
+  enviando = true; redaccionCerrar();
+  const win = ventanaOculta(); let pulsado = false;
+  try {
+    const o = await abrirRedaccion(win, d.courseId);
+    if (o.login) return { ok: false, enviado: false, login: true, msg: 'Inicia sesión en Blackboard y vuelve a intentarlo' };
+    if (!o.ok) return { ok: false, enviado: false, msg: 'Blackboard no abrió la redacción de mensajes (¿cambió la página?)' };
+    for (const x of dest) {
+      const r = await js(win, `window.__bbc.elegir(${JSON.stringify(String(x.id))}, ${JSON.stringify(x.nombre)})`);
+      if (!r || !r.ok) return { ok: false, enviado: false, msg: `No se pudo añadir a ${x.nombre} como destinatario${r && r.msg ? ' (' + r.msg + ')' : ''}. No se ha enviado nada.` };
+    }
+    if (!(await js(win, `window.__bbc.copia(${!!d.copia})`))) return { ok: false, enviado: false, msg: 'No se pudo ajustar la copia por correo. No se ha enviado nada.' };
+    if (!(await js(win, 'window.__bbc.foco()'))) return { ok: false, enviado: false, msg: 'No se pudo escribir en el editor de Blackboard. No se ha enviado nada.' };
+    await teclear(win, texto); await dormir(700);
+    // COMPROBACIÓN FINAL: lo que muestra Blackboard debe ser exactamente lo confirmado por el usuario
+    const e = await js(win, 'window.__bbc.estado()');
+    const esperados = dest.map(x => norm(x.nombre)).sort().join('|'), vistos = (e.chips || []).map(norm).sort().join('|');
+    if (esperados !== vistos) return { ok: false, enviado: false, msg: 'Los destinatarios que muestra Blackboard no coinciden con los elegidos. No se ha enviado nada.' };
+    if (norm(e.texto) !== norm(texto)) return { ok: false, enviado: false, msg: 'El texto que muestra Blackboard no coincide con el escrito. No se ha enviado nada.' };
+    if (!!e.copia !== !!d.copia) return { ok: false, enviado: false, msg: 'La opción de copia por correo no coincide. No se ha enviado nada.' };
+    if (!e.enviarActivo) return { ok: false, enviado: false, msg: 'Blackboard no activa el botón Enviar. No se ha enviado nada.' };
+    pulsado = true;   // a partir de aquí ya puede haberse enviado
+    const env = await js(win, 'window.__bbc.enviar()');
+    if (!env || !env.ok) { pulsado = false; return { ok: false, enviado: false, msg: (env && env.msg) || 'No se pudo pulsar Enviar. No se ha enviado nada.' }; }
+    const t0 = Date.now();
+    while (Date.now() - t0 < (cfg.esperaEnvioMs || 20000)) { if (!/\/messages\/create/.test(win.webContents.getURL())) return { ok: true, enviado: true, msg: 'Mensaje enviado' }; await dormir(500); }
+    return { ok: false, enviado: 'desconocido', msg: 'Se pulsó Enviar pero Blackboard no confirmó el envío. Compruébalo en Blackboard antes de volver a enviarlo.' };
+  } catch (err) {
+    return pulsado ? { ok: false, enviado: 'desconocido', msg: 'Error durante el envío: ' + String(err.message || err).slice(0, 100) + '. Compruébalo en Blackboard antes de volver a enviarlo.' }
+      : { ok: false, enviado: false, msg: 'Error preparando el mensaje: ' + String(err.message || err).slice(0, 100) + '. No se ha enviado nada.' };
+  } finally { enviando = false; try { win.webContents.debugger.detach(); } catch {} if (!win.isDestroyed()) win.destroy(); }
+}
+
 function notificar(titulo, cuerpo, onClick) {
   try { if (!Notification.isSupported()) return; const n = new Notification({ title: titulo, body: cuerpo }); if (onClick) n.on('click', onClick); n.show(); } catch {}
 }
@@ -199,4 +305,4 @@ function abrir(onClosed) {
   loginWin.loadURL(cfg.campus + '/ultra/messages');
   loginWin.on('closed', () => { loginWin = null; if (onClosed) onClosed(); });
 }
-module.exports = { init, check, state, abrir, hilo, _limpia: limpia, _nombre: nombre };
+module.exports = { init, check, state, abrir, hilo, destinatarios, redaccionCerrar, enviar, _limpia: limpia, _nombre: nombre };

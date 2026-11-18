@@ -473,12 +473,13 @@ async function refrescaMsgs() {
   msgLeyendo = false; updateMsgBtn(); if (view === 'mensajes') drawMensajes();
 }
 function showMensajes(push = true) {
-  view = 'mensajes'; current = null; msgHilo = null;
+  view = 'mensajes'; current = null; msgHilo = null; if (msgNuevo) { msgNuevo = null; try { window.brain.mensajesCerrarRedaccion(); } catch {} }
   if (push && hist[hp] !== '@mensajes') { hist = hist.slice(0, hp + 1); hist.push('@mensajes'); hp = hist.length - 1; }
   $('#crumb').textContent = 'Mensajes'; btns(); markOn(); drawMensajes();
   loadMsgs().then(() => { if (msgs && !['no-aplica', 'sin-campus', 'login'].includes(msgs.status) && (!msgs.lastCheck || Date.now() - new Date(msgs.lastCheck) > 5 * 60000)) refrescaMsgs(); });   // al abrir: lo guardado al instante y, si tiene más de 5 min, se vuelve a leer
 }
 function drawMensajes() {
+  if (msgNuevo && msgs) return drawNuevo();
   if (msgHilo && msgs) return drawHilo();
   const keep = doc.scrollTop; doc.replaceChildren(); $('#crumb').textContent = 'Mensajes';
   const head = el('div', 'dh'); head.append(el('h1', null, 'Mensajes')); doc.append(head);
@@ -489,6 +490,7 @@ function drawMensajes() {
   h.append(el('i', 'led ' + cls), el('b', null, 'Blackboard'), document.createTextNode(msgLeyendo ? (msgs.msg || 'Leyendo…') : msgs.msg + hora));
   if (!['no-aplica', 'sin-campus'].includes(st)) {
     const bAct = el('button', null, msgLeyendo ? 'Leyendo…' : 'Actualizar'); bAct.disabled = msgLeyendo; bAct.onclick = refrescaMsgs; h.append(bAct);
+    if (cursosMsg().length && st !== 'login') { const bn = el('button', 'pri', '✉ Nuevo mensaje'); bn.onclick = () => abrirNuevo(); h.append(bn); }
     if (st === 'login' || st === 'nunca') { const bL = el('button', null, 'Iniciar sesión en Blackboard'); bL.onclick = () => window.brain.mensajesLogin(); h.append(bL); }
   }
   box.append(h); doc.append(box);
@@ -498,6 +500,7 @@ function drawMensajes() {
     const sec = el('div', 'msg-cur'), hd = el('div', 'msg-h'); hd.style.setProperty('--c', COLOR[c.sigla.toLowerCase()] || 'var(--acc)');
     hd.append(el('i'), el('b', null, NOMBRES[c.sigla.toLowerCase()] || (c.nombre || '').replace(/\s*\([^)]*\)\s*$/, '') || c.sigla), el('span', 'msg-n', `${c.conversaciones.length} conversación(es)`));
     if (c.sinLeer) hd.append(el('span', 'msg-un', `${c.sinLeer} sin leer`));
+    const bnu = el('button', null, '✉ Nuevo mensaje'); bnu.onclick = () => abrirNuevo(c.courseId); hd.append(bnu);
     const ab = el('button', null, 'Abrir en Blackboard ↗'); ab.onclick = () => window.brain.external(`${msgs.campus}/ultra/courses/${c.courseId}/messages`); hd.append(ab); sec.append(hd);
     for (const v of c.conversaciones) {
       const r = el('div', 'msg-row' + (v.leido ? '' : ' nw')), top = el('div', 'msg-top');
@@ -543,6 +546,80 @@ function drawHilo() {
   const f = el('div', 'bbhead'), ref = el('button', null, 'Volver a leer'); ref.onclick = () => abrirHilo({ courseId: H.courseId, sigla: '', nombre: H.titulo.split(' · ')[0] }, { id: H.convId, remitente: H.titulo.split(' · ').slice(1).join(' · ') }, true);
   f.append(document.createTextNode(`${d.mensajes.length} mensaje(s) · ${d.deCache ? 'guardado en tu equipo' + (d.leidoEn ? ' el ' + fechaMsg(d.leidoEn) : '') : 'leído ahora de Blackboard'}`), ref); doc.append(f);
   doc.scrollTop = keep;
+}
+// ---- Mensaje nuevo: asignatura, destinatarios, texto → pantalla de confirmación → envío por la redacción de Blackboard (ver mensajes.js) ----
+let msgNuevo = null;   // { courseId, dest: [{ id, nombre, rol }], texto, copia, fase: 'editar' | 'confirmar' | 'enviando' | 'hecho', res }
+const cursosMsg = () => (msgs && msgs.cursos ? msgs.cursos.filter(c => c.habilitado !== false) : []);
+const nombreCursoMsg = (c) => NOMBRES[c.sigla.toLowerCase()] || (c.nombre || '').replace(/\s*\([^)]*\)\s*$/, '') || c.sigla;
+function abrirNuevo(courseId) {
+  const cs = cursosMsg(); if (!cs.length) return;
+  msgHilo = null; msgNuevo = { courseId: (courseId && cs.some(c => c.courseId === courseId)) ? courseId : cs[0].courseId, dest: [], texto: '', copia: false, fase: 'editar' }; drawMensajes();
+}
+function cierraNuevo() { msgNuevo = null; try { window.brain.mensajesCerrarRedaccion(); } catch {} drawMensajes(); }
+function drawNuevo() {
+  const keep = doc.scrollTop, N = msgNuevo; doc.replaceChildren(); $('#crumb').textContent = 'Mensajes';
+  const head = el('div', 'dh'); head.append(el('h1', null, 'Nuevo mensaje')); doc.append(head);
+  const cur = cursosMsg().find(c => c.courseId === N.courseId) || cursosMsg()[0];
+  const bar = el('div', 'bbhead'), back = el('button', null, '‹ Volver a Mensajes'); back.onclick = cierraNuevo; bar.append(back, el('b', null, nombreCursoMsg(cur))); doc.append(bar);
+  const box = el('div', 'msg-new');
+  if (N.fase === 'enviando') { box.append(el('p', null, 'Enviando el mensaje por Blackboard… puede tardar unos segundos. No cierres la app.')); doc.append(box); return; }
+  if (N.fase === 'hecho') {
+    const r = N.res || {}, ok = r.ok && r.enviado === true, dudoso = r.enviado === 'desconocido';
+    box.append(el('p', 'msg-res-t ' + (ok ? 'ok' : 'ko'), ok ? '✓ Mensaje enviado' : dudoso ? '⚠ No se pudo confirmar el envío' : 'No se ha enviado'), ok ? el('span') : el('p', null, r.msg || ''));
+    if (dudoso) box.append(el('p', 'msg-warn', 'Comprueba en Blackboard (Mensajes de la asignatura) si el mensaje salió antes de volver a enviarlo, para no mandarlo dos veces.'));
+    const row = el('div', 'row');
+    if (ok) { const b = el('button', 'pri', 'Volver a Mensajes'); b.onclick = cierraNuevo; row.append(b); }
+    else {
+      const b1 = el('button', 'pri', 'Volver al mensaje'); b1.onclick = () => { N.fase = 'editar'; drawMensajes(); }; row.append(b1);
+      if (r.login) { const bl = el('button', null, 'Iniciar sesión en Blackboard'); bl.onclick = () => window.brain.mensajesLogin(); row.append(bl); }
+      const bc = el('button', null, 'Descartar'); bc.onclick = cierraNuevo; row.append(bc);
+    }
+    box.append(row); doc.append(box); return;
+  }
+  if (N.fase === 'confirmar') {
+    box.append(el('p', 'msg-res-t', `Vas a enviar este mensaje a ${N.dest.length} persona(s) en ${nombreCursoMsg(cur)}`));
+    const ul = el('div', 'msg-chips'); for (const d of N.dest) ul.append(el('span', 'msg-chip', d.nombre + (d.rol ? ' · ' + d.rol : ''))); box.append(ul);
+    box.append(el('div', 'msg-quote', N.texto), el('p', 'dsub', N.copia ? 'Se enviará también una copia por correo a los destinatarios.' : 'Sin copia por correo.'));
+    box.append(el('p', 'msg-warn', 'Se enviará de verdad desde tu cuenta de Blackboard y no se puede deshacer.'));
+    const row = el('div', 'row'), b1 = el('button', null, '‹ Volver a editar'), b2 = el('button', 'pri', 'Enviar ahora');
+    b1.onclick = () => { N.fase = 'editar'; drawMensajes(); };
+    b2.onclick = async () => {
+      b2.disabled = b1.disabled = true; N.fase = 'enviando'; drawMensajes();
+      let r; try { r = await window.brain.mensajesEnviar({ courseId: N.courseId, destinatarios: N.dest.map(d => ({ id: d.id, nombre: d.nombre })), texto: N.texto, copia: N.copia }); } catch (e) { r = { ok: false, enviado: 'desconocido', msg: 'Error: ' + String(e.message || e) + '. Comprueba en Blackboard antes de volver a enviarlo.' }; }
+      if (!msgNuevo) return; N.fase = 'hecho'; N.res = r || { ok: false, enviado: false, msg: 'Sin respuesta' }; drawMensajes();
+    };
+    row.append(b1, b2); box.append(row); doc.append(box); return;
+  }
+  // fase 'editar'
+  const sel = el('select'); for (const c of cursosMsg()) { const o = el('option', null, nombreCursoMsg(c)); o.value = c.courseId; if (c.courseId === N.courseId) o.selected = true; sel.append(o); }
+  sel.onchange = () => { N.courseId = sel.value; N.dest = []; try { window.brain.mensajesCerrarRedaccion(); } catch {} drawMensajes(); };
+  box.append(el('label', 'msg-lbl', 'Asignatura'), sel, el('label', 'msg-lbl', 'Para'));
+  const chips = el('div', 'msg-chips'), res = el('div', 'msg-resl'), q = el('input'), estado = el('div', 'dsub');
+  const pintaChips = () => { chips.replaceChildren(); if (!N.dest.length) chips.append(el('span', 'dsub', 'Nadie todavía: busca por nombre o apellidos.')); for (const d of N.dest) { const c = el('span', 'msg-chip', d.nombre + (d.rol ? ' · ' + d.rol : '')), x = el('button', null, '✕'); x.title = 'Quitar'; x.onclick = () => { N.dest = N.dest.filter(y => y.id !== d.id); pintaChips(); pintaBoton(); pintaRes(N.ultimos || []); }; c.append(x); chips.append(c); } };
+  const pintaRes = (lista) => { N.ultimos = lista; res.replaceChildren(); for (const p of lista) { const ya = N.dest.some(d => d.id === p.id), r = el('div', 'msg-r' + (ya ? ' ya' : '')); r.append(el('b', null, p.nombre), el('span', null, [p.rol, p.usuario].filter(Boolean).join(' · ') + (ya ? ' · añadido' : ''))); if (!ya) r.onclick = () => { N.dest.push({ id: p.id, nombre: p.nombre, rol: p.rol }); pintaChips(); pintaBoton(); pintaRes(lista); }; res.append(r); } };
+  let t = null, serie = 0;
+  q.placeholder = 'Buscar por nombre o apellidos (mínimo 2 letras)…'; q.autocomplete = 'off';
+  q.oninput = () => {
+    clearTimeout(t); const v = q.value.trim(); if (v.length < 2) { estado.textContent = ''; pintaRes([]); return; }
+    t = setTimeout(async () => {
+      const mi = ++serie; estado.textContent = 'Buscando en Blackboard… la primera vez tarda unos segundos.';
+      let r; try { r = await window.brain.mensajesDestinatarios(N.courseId, v); } catch (e) { r = { ok: false, msg: String(e.message || e) }; }
+      if (mi !== serie || !msgNuevo || msgNuevo !== N) return;   // llegó tarde: hay otra búsqueda más reciente
+      estado.textContent = r.ok ? (r.resultados.length ? '' : 'Sin resultados.') : (r.msg || 'No se pudo buscar'); pintaRes(r.ok ? r.resultados : []);
+    }, 600);
+  };
+  box.append(chips, q, estado, res);
+  box.append(el('label', 'msg-lbl', 'Mensaje'));
+  const ta = el('textarea', 'msg-ta'); ta.rows = 8; ta.maxLength = 5000; ta.placeholder = 'Escribe el mensaje…'; ta.value = N.texto;
+  const cont = el('div', 'dsub'), pintaCont = () => { cont.textContent = `${ta.value.length} / 5000`; };
+  ta.oninput = () => { N.texto = ta.value; pintaCont(); pintaBoton(); };
+  const cb = el('input'); cb.type = 'checkbox'; cb.checked = N.copia; cb.onchange = () => { N.copia = cb.checked; };
+  const lab = el('label', 'msg-chk'); lab.append(cb, document.createTextNode(' Enviar también una copia por correo electrónico a los destinatarios'));
+  box.append(ta, cont, lab);
+  const row = el('div', 'row'), bc = el('button', null, 'Cancelar'), br = el('button', 'pri', 'Revisar y enviar');
+  bc.onclick = cierraNuevo; br.onclick = () => { N.texto = ta.value.trim(); N.copia = cb.checked; N.fase = 'confirmar'; drawMensajes(); };
+  const pintaBoton = () => { br.disabled = !(N.dest.length && ta.value.trim()); };
+  row.append(bc, br); box.append(row); doc.append(box); pintaChips(); pintaRes(N.ultimos || []); pintaCont(); pintaBoton(); doc.scrollTop = keep;
 }
 // ---- Ingesta de lo nuevo del campus (Blackboard, Moodle, Canvas o calendario iCal): ficheros → _entrada, notas/estados → Brain, redacción → Claude ----
 // Panel dentro de Avisos (debajo de las novedades). El estado vive en `ing`, así sobrevive a los redibujados de la pantalla.
