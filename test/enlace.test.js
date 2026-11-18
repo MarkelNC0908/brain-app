@@ -1,0 +1,17 @@
+const E = require('../src/enlace.js');
+let ok = 0, ko = 0; const t = (n, c) => { c ? ok++ : (ko++, console.log('FALLA', n)); };
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+t('remoto https', E.repoDeRemoto('https://github.com/ana/Brain.git') === 'ana/Brain');
+t('remoto https sin .git', E.repoDeRemoto('https://github.com/ana/Brain') === 'ana/Brain');
+t('remoto con usuario en la URL (sin exponerlo)', E.repoDeRemoto('https://ana@github.com/ana/Brain.git') === 'ana/Brain');
+t('remoto ssh', E.repoDeRemoto('git@github.com:ana/Brain.git') === 'ana/Brain' && E.repoDeRemoto('ssh://git@github.com/ana/Brain.git') === 'ana/Brain');
+t('remoto que no es de GitHub', E.repoDeRemoto('https://gitlab.com/ana/Brain.git') === '' && E.repoDeRemoto('') === '');
+const l = E.construyeEnlace({ repo: 'ana/Brain', branch: 'main' });
+t('enlace', l === 'brain://conectar?repo=ana%2FBrain&branch=main');
+t('ida y vuelta', eq(E.leeEnlace(l), { repo: 'ana/Brain', branch: 'main' }));
+t('rama con barra', eq(E.leeEnlace(E.construyeEnlace({ repo: 'ana/Brain', branch: 'feat/x' })), { repo: 'ana/Brain', branch: 'feat/x' }));
+t('rama rara → main', eq(E.leeEnlace('brain://conectar?repo=ana%2FBrain&branch=..%2F..'), { repo: 'ana/Brain', branch: 'main' }));
+t('ignora un token aunque venga en el enlace', eq(E.leeEnlace('brain://conectar?repo=ana%2FBrain&branch=main&token=ghp_x'), { repo: 'ana/Brain', branch: 'main' }));
+t('rechaza otros enlaces', E.leeEnlace('https://github.com/ana/Brain') === null && E.leeEnlace('brain://otra?repo=a%2Fb') === null && E.leeEnlace('brain://conectar?repo=..%2Fx') === null && E.leeEnlace('') === null);
+let lanza = false; try { E.construyeEnlace({ repo: 'mal' }); } catch { lanza = true; } t('repo no válido lanza', lanza);
+console.log('ok', ok, 'ko', ko);

@@ -678,3 +678,21 @@ async function pintaApariencia() {
   }
   w.append(el('p', 'dsub', 'El idioma de la app es el español: la traducción a otros idiomas no está hecha.'));
 }
+
+// ---------- 11 · Conectar el móvil: QR con el repositorio y la rama del Brain (sin token: en el móvil se inicia sesión con GitHub) ----------
+let movilQR = false;
+async function pintaMovil() {
+  const w = $('#aj-movil'); if (!w) return; w.replaceChildren(); w.append(el('h2', null, '📱 Conectar el móvil'));
+  if (!esEscritorio() || !window.brain.movilEnlace) { w.append(el('p', 'dsub', 'Disponible en la app de escritorio.')); return; }
+  w.append(el('p', 'dsub', 'En la app del móvil: ⚙ → «Escanear QR del escritorio». El QR solo lleva el repositorio y la rama de tu Brain, no ningún token: después el móvil te pide iniciar sesión con GitHub.'));
+  const b = el('button', 'pri', movilQR ? 'Ocultar el QR' : 'Mostrar el QR'); b.onclick = () => { movilQR = !movilQR; pintaMovil(); }; const f = el('div', 'aj-add'); f.append(b); w.append(f);
+  if (!movilQR) return;
+  let r; try { r = await window.brain.movilEnlace(); } catch { r = null; } if (view !== 'ajustes') return;
+  if (!r || !r.ok) { w.append(el('p', 'msg-warn', (r && r.msg) || 'No se pudo preparar el enlace.')); return; }
+  if (typeof qrcode !== 'function') { w.append(el('p', 'msg-warn', 'Falta la librería del QR en esta compilación.')); return; }
+  const q = qrcode(0, 'M'); q.addData(r.enlace); q.make();
+  const img = el('img'); img.src = q.createDataURL(6, 4); img.alt = 'QR para conectar el móvil'; img.className = 'qr-movil';
+  w.append(img, el('p', 'dsub', `Repositorio ${r.repo} · rama ${r.branch}`));
+  const c = el('button', null, 'Copiar enlace'); c.onclick = async () => { try { await navigator.clipboard.writeText(r.enlace); c.textContent = '✓ Copiado'; } catch { c.textContent = 'No se pudo copiar'; } };
+  const g = el('div', 'aj-add'); g.append(c, el('code', null, r.enlace)); w.append(g);
+}

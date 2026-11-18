@@ -259,3 +259,4 @@ body:not([data-os=darwin]) #bar{height:40px}
 .nt-nuevo{font-size:11px;font-weight:600;color:var(--acc);margin-left:6px}
 
 .flash{animation:flashh 5s ease-out}@keyframes flashh{0%,60%{background:#ffd60a66}100%{background:transparent}}mark.flash-m{background:#ffd60a99;color:inherit;border-radius:3px;padding:0 2px}
+.qr-movil{display:block;width:216px;height:216px;image-rendering:pixelated;background:#fff;padding:8px;border-radius:12px;margin:10px 0}

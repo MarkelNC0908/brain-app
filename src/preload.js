@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('brain', {
   diagInforme: () => ipcRenderer.invoke('diag:informe'),
   diagCarpeta: () => ipcRenderer.invoke('diag:carpeta'),
   ajustesGet: () => ipcRenderer.invoke('ajustes:get'),
+  movilEnlace: () => ipcRenderer.invoke('movil:enlace'),
   ajustesSet: (p) => ipcRenderer.invoke('ajustes:set', p),
   onNotasCambio: (cb) => ipcRenderer.on('notas:cambio', cb),
   onNotasUi: (cb) => ipcRenderer.on('ui:notas', cb),

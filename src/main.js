@@ -477,6 +477,18 @@ const GIT = buscaGit();
 const git = (args, timeout = 60000) => new Promise(res => execFile(GIT, args, { cwd: vault, timeout, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
   (err, so, se) => res({ err, out: ((so || '') + (se || '')).trim() })));
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+// Conectar el móvil (Ajustes): repositorio y rama del Brain para mostrarlos como QR. Solo eso: nunca credenciales ni tokens.
+const enlaceMod = require('./enlace');
+ipcMain.handle('movil:enlace', async (e) => {
+  if (!fromWin(e)) return { ok: false };
+  if (!vault) return { ok: false, msg: 'Abre primero tu Brain.' };
+  const r = await git(['remote', 'get-url', 'origin'], 15000);
+  if (r.err) return { ok: false, msg: 'Esta carpeta no tiene un repositorio remoto (origin): sube tu Brain a GitHub para poder abrirlo en el móvil.' };
+  const repo = enlaceMod.repoDeRemoto(r.out.split('\n')[0]);
+  if (!repo) return { ok: false, msg: 'El repositorio de esta carpeta no está en GitHub; el móvil solo lee repositorios de GitHub.' };
+  const b = await git(['rev-parse', '--abbrev-ref', 'HEAD'], 15000), rama = !b.err && b.out && b.out !== 'HEAD' ? b.out.split('\n')[0] : 'main';
+  try { return { ok: true, repo, branch: rama, enlace: enlaceMod.construyeEnlace({ repo, branch: rama }) }; } catch (x) { return { ok: false, msg: String(x.message || x) }; }
+});
 let syncing = null;
 async function sync() {
   if (!vault) return { ok: false, msg: 'Sin carpeta del Brain' };
