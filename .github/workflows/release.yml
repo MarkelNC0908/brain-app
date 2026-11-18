@@ -51,6 +51,10 @@ jobs:
         run: node -e "const v=require('./package.json').version, t=process.env.GITHUB_REF_NAME.replace(/^v/,''); if(v!==t){console.error('package.json dice '+v+' y la etiqueta '+t);process.exit(1)}"
       - run: npm ci
       - run: npm run ${{ matrix.script }}
+      - name: Dar permiso de ejecución al ayudante de la terminal (node-pty)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: find dist -name spawn-helper -type f -exec chmod +x {} +
       - name: Comprimir (macOS)
         if: runner.os == 'macOS'
         run: cd dist && ditto -c -k --sequesterRsrc --keepParent "${{ matrix.carpeta }}" "../${{ matrix.zip }}"
@@ -61,6 +65,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: Compress-Archive -Path "dist/${{ matrix.carpeta }}" -DestinationPath "${{ matrix.zip }}"
+      - name: Comprobar que el ayudante de la terminal sale ejecutable en el zip
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          L=$(unzip -Z "${{ matrix.zip }}" | grep 'spawn-helper$' || true)
+          echo "$L"
+          [ -n "$L" ] || { echo 'No hay spawn-helper en el zip'; exit 1; }
+          if echo "$L" | grep -q '^-rw-'; then echo 'spawn-helper sin permiso de ejecución en el zip'; exit 1; fi
       - name: Hash sha256
         shell: bash
         run: |

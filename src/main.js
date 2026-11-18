@@ -527,11 +527,14 @@ ipcMain.handle('term:start', (e, cols, rows) => {
   if (!pty) return { ok: false, msg: 'node-pty no está disponible en esta compilación' };
   const home = app.getPath('home');
   try {
+    const arreglo = require('./ptyfix').aseguraHelper();   // en los zips de macOS el ayudante venía sin permiso de ejecución
+    if (arreglo.arreglados.length) console.log('terminal: permiso de ejecución dado a', arreglo.arreglados.join(', '));
+    arreglo.fallos.forEach(f => console.error('terminal: no se pudo dar permiso a', f.ruta, f.msg));
     term = pty.spawn(IS_WIN ? 'powershell.exe' : (process.env.SHELL || (IS_MAC ? '/bin/zsh' : '/bin/bash')), IS_WIN ? [] : ['-l', '-i'], {
       name: 'xterm-256color', cols: Math.max(20, cols | 0), rows: Math.max(5, rows | 0), cwd: vault || home,
       env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', PATH: IS_WIN ? (process.env.PATH || '') : `${home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || ''}` },
     });
-  } catch (err) { return { ok: false, msg: String(err.message || err) }; }
+  } catch (err) { return { ok: false, msg: require('./ptyfix').mensajeError(err) }; }
   term.onData(d => { if (win && !win.isDestroyed()) win.webContents.send('term:data', d); });
   term.onExit(() => { term = null; if (win && !win.isDestroyed()) win.webContents.send('term:exit'); });
   return { ok: true, cwd: vault || home };
