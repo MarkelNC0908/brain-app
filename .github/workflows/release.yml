@@ -1,0 +1,96 @@
+# Al subir una etiqueta v* (por ejemplo v1.0.14) compila los tres zips de escritorio en cada sistema real, ejecuta las pruebas en los tres y deja un release BORRADOR
+# con los zips, sus .sha256 y notas generadas. Tú lo revisas, añades el APK si quieres (se compila aparte) y lo publicas.
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  pruebas:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: node node_modules/electron/install.js
+      - name: Prueba de arranque (Linux, con pantalla virtual)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run humo
+      - name: Prueba de arranque
+        if: runner.os != 'Linux'
+        run: npm run humo
+  compilar:
+    needs: pruebas
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, script: build, carpeta: Brain-darwin-arm64, zip: Brain-macos-arm64.zip }
+          - { os: windows-latest, script: 'build:win', carpeta: Brain-win32-x64, zip: Brain-windows-x64.zip }
+          - { os: ubuntu-latest, script: 'build:linux', carpeta: Brain-linux-x64, zip: Brain-linux-x64.zip }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: La versión de package.json debe coincidir con la etiqueta
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: node -e "const v=require('./package.json').version, t=process.env.GITHUB_REF_NAME.replace(/^v/,''); if(v!==t){console.error('package.json dice '+v+' y la etiqueta '+t);process.exit(1)}"
+      - run: npm ci
+      - run: npm run ${{ matrix.script }}
+      - name: Comprimir (macOS)
+        if: runner.os == 'macOS'
+        run: cd dist && ditto -c -k --sequesterRsrc --keepParent "${{ matrix.carpeta }}" "../${{ matrix.zip }}"
+      - name: Comprimir (Linux)
+        if: runner.os == 'Linux'
+        run: cd dist && zip -qry "../${{ matrix.zip }}" "${{ matrix.carpeta }}"
+      - name: Comprimir (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "dist/${{ matrix.carpeta }}" -DestinationPath "${{ matrix.zip }}"
+      - name: Hash sha256
+        shell: bash
+        run: |
+          if command -v sha256sum >/dev/null; then sha256sum "${{ matrix.zip }}" > "${{ matrix.zip }}.sha256"; else shasum -a 256 "${{ matrix.zip }}" > "${{ matrix.zip }}.sha256"; fi
+          cat "${{ matrix.zip }}.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.zip }}
+          path: |
+            ${{ matrix.zip }}
+            ${{ matrix.zip }}.sha256
+          if-no-files-found: error
+  borrador:
+    needs: compilar
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: salida
+          merge-multiple: true
+      - name: Crear (o completar) el release borrador
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" salida/* --clobber
+          else
+            EXTRA=""; case "$TAG" in *-*) EXTRA="--prerelease";; esac   # etiquetas como v1.0.14-rc1 son de prueba
+            gh release create "$TAG" salida/* --draft $EXTRA --title "Brain ${TAG#v}" --generate-notes
+          fi

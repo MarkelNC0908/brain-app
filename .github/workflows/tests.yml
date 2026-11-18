@@ -1,0 +1,42 @@
+# Ejecuta las pruebas en cada subida y en cada pull request.
+# Las pruebas de pantalla usan el Brain de ejemplo de test/fixtures, así que corren aquí igual que en cualquier equipo.
+name: Pruebas
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # --ignore-scripts: no hace falta descargar Electron ni compilar node-pty para probar la lógica
+      - run: npm ci --ignore-scripts
+      - run: npm test
+  # Arranca la app de verdad (Electron) en cada sistema, recorre las pantallas con el Brain de ejemplo y falla si hay errores.
+  humo:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # sin scripts (no se compila node-pty) y descargando solo el binario de Electron
+      - run: npm ci --ignore-scripts
+      - run: node node_modules/electron/install.js
+      - name: Prueba de arranque (Linux, con pantalla virtual)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run humo
+      - name: Prueba de arranque
+        if: runner.os != 'Linux'
+        run: npm run humo

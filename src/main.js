@@ -14,6 +14,10 @@ const path = require('path');
 // Compatibilidad: hasta la 1.0.2 la app se llamaba «Brain U-tad»; si existe esa carpeta de datos y aún no la nueva, se sigue usando (así no se pierden perfiles ni sesiones)
 try { const base = app.getPath('appData'), viejo = path.join(base, 'Brain U-tad'), nuevo = path.join(base, 'Brain'); if (fs.existsSync(viejo) && !fs.existsSync(nuevo)) app.setPath('userData', viejo); } catch {}
 
+// Modo prueba de arranque (npm run humo): usa una carpeta de datos temporal y un Brain de ejemplo, recorre las pantallas y sale con 0 si no hay errores
+const HUMO = process.argv.includes('--humo');
+if (HUMO && process.env.BRAIN_HUMO_DATOS) app.setPath('userData', process.env.BRAIN_HUMO_DATOS);
+
 // Carpetas que NUNCA se leen (CLAUDE.md: 99-Privado fuera de la IA; _entrada sin procesar)
 const EXCLUIDAS = new Set(['99-privado', '_entrada', '.git', '.obsidian', '.claude', 'node_modules', 'templates']);
 const EXT = new Set(['.md', '.txt']);
@@ -70,6 +74,20 @@ function buildIndex() {
   });
 }
 
+// Carpeta libre: los PDF, Word y PowerPoint aportan su texto (extraído en local y guardado en caché) a la búsqueda y a «Preguntar». Presupuesto de tiempo para no retrasar el arranque: lo que falte se hace en la siguiente carga.
+const extraer = require('./extraer');
+async function buildIndexAsync() {
+  const idx = buildIndex();
+  if (L.esBrain(vault)) return idx;   // en un Brain los originales están en _entrada: no se leen fuera de una ingesta
+  const cache = path.join(app.getPath('userData'), 'textcache'), t0 = Date.now();
+  for (const n of idx) {
+    if (!n.externo || n.body || !/^(pdf|docx|pptx)$/i.test(n.ext || '') || Date.now() - t0 > 25000) continue;
+    const abs = realPaths.get(n.path); if (!abs) continue;
+    const txt = await extraer.extraerTexto(abs, cache); if (txt) { n.body = txt; n.extraido = true; }
+  }
+  return idx;
+}
+
 function watch() {
   if (watcher) watcher.close();
   let t;
@@ -83,9 +101,9 @@ function watch() {
 
 function setVault(p) { vault = p; watch(); }
 
-ipcMain.handle('vault:index', () => {
+ipcMain.handle('vault:index', async () => {
   if (!vault) return { ok: false };
-  try { return { ok: true, root: vault, modo: L.esBrain(vault) ? 'brain' : 'carpeta', notes: buildIndex() }; } catch (e) { return { ok: false, error: String(e) }; }
+  try { return { ok: true, root: vault, modo: L.esBrain(vault) ? 'brain' : 'carpeta', notes: await buildIndexAsync() }; } catch (e) { return { ok: false, error: String(e) }; }
 });
 ipcMain.handle('file:open', async (e, rel) => { const abs = realPaths.get(rel); if (!fromWin(e) || !abs) return { ok: false }; const err = await shell.openPath(abs); return err ? { ok: false, msg: err } : { ok: true }; });
 ipcMain.handle('vault:pick', (e) => { if (fromWin(e) && win) win.webContents.send('ui:editprofile'); });   // «cambiar carpeta» ahora es editar el perfil
@@ -132,11 +150,196 @@ const avisaMensajes = () => { if (win && !win.isDestroyed()) win.webContents.sen
 const revisarMensajes = (silencioso) => mensajesMod.check({ soloResumen: true, silencioso, onClick: abrirMensajes }).then(r => { avisaMensajes(); return r; });
 // Asistente (Ollama local): la pregunta se responde con trozos de los apuntes del perfil activo; el texto sale por 'ia:trozo' y nada va a internet
 ipcMain.handle('ia:estado', (e) => (fromWin(e) ? asistenteMod.estado() : { ok: false }));
-ipcMain.handle('ia:preguntar', (e, d) => {
+ipcMain.handle('ia:preguntar', async (e, d) => {
   if (!fromWin(e) || !vault || !d || typeof d !== 'object') return { ok: false, msg: 'No permitido' };
   const hist = (Array.isArray(d.historial) ? d.historial : []).slice(-6).map(m => ({ rol: m && m.rol === 'assistant' ? 'assistant' : 'user', txt: String((m && m.txt) || '').slice(0, 3000) }));
-  let notas; try { notas = buildIndex(); } catch (err) { return { ok: false, msg: 'No se pudieron leer los apuntes' }; }
-  return asistenteMod.preguntar({ id: String(d.id || '').slice(0, 40), pregunta: String(d.pregunta || ''), sigla: String(d.sigla || '').slice(0, 20), modelo: String(d.modelo || ''), historial: hist }, notas, (m) => { if (win && !win.isDestroyed()) win.webContents.send('ia:trozo', m); });
+  let notas; try { notas = await buildIndexAsync(); } catch (err) { return { ok: false, msg: 'No se pudieron leer los apuntes' }; }
+  return asistenteMod.preguntar({ id: String(d.id || '').slice(0, 40), pregunta: String(d.pregunta || ''), sigla: String(d.sigla || '').slice(0, 20), modelo: String(d.modelo || ''), proveedor: d.proveedor === 'gemini' ? 'gemini' : 'ollama', historial: hist }, notas, (m) => { if (win && !win.isDestroyed()) win.webContents.send('ia:trozo', m); });
+});
+ipcMain.handle('ia:clave', (e, k) => (fromWin(e) ? asistenteMod.guardarClave(k) : { ok: false, msg: 'No permitido' }));
+ipcMain.handle('ia:clave-quitar', (e) => (fromWin(e) ? asistenteMod.quitarClave() : { ok: false }));
+// Enlaces del campus (Ajustes): lista de {nombre, url} por perfil, en la carpeta de datos de la app; solo https y se abren en el navegador del sistema
+const enlacesFile = () => (profile ? profiles.datos(profile).enlaces : null);
+function leerEnlaces() { try { const l = JSON.parse(fs.readFileSync(enlacesFile(), 'utf8')); return Array.isArray(l) ? l.filter(x => x && typeof x.url === 'string') : []; } catch { return []; } }
+ipcMain.handle('enl:lista', (e) => (fromWin(e) && profile ? { ok: true, campus: /^https:\/\//i.test(profile.campusUrl || '') ? profile.campusUrl : '', lista: leerEnlaces() } : { ok: false }));
+ipcMain.handle('enl:guardar', (e, lista) => {
+  if (!fromWin(e) || !profile || !Array.isArray(lista)) return { ok: false, msg: 'No permitido' };
+  const out = [];
+  for (const x of lista.slice(0, 60)) {
+    let u; try { u = new URL(String((x && x.url) || '').trim()); } catch { return { ok: false, msg: 'Hay un enlace que no es una dirección válida' }; }
+    if (u.protocol !== 'https:') return { ok: false, msg: 'Solo se admiten enlaces https://' };
+    out.push({ nombre: String((x && x.nombre) || '').trim().slice(0, 80) || u.hostname, url: u.href.slice(0, 600) });
+  }
+  try { fs.writeFileSync(enlacesFile(), JSON.stringify(out, null, 1)); } catch (err) { return { ok: false, msg: 'No se pudo guardar: ' + String(err.message || err) }; }
+  return { ok: true, lista: out };
+});
+ipcMain.handle('ia:tarea', (e, d) => (fromWin(e) && d && typeof d === 'object' ? asistenteMod.tarea({ tipo: String(d.tipo || ''), texto: String(d.texto || ''), proveedor: d.proveedor === 'gemini' ? 'gemini' : 'ollama', modelo: String(d.modelo || '') }) : { ok: false, msg: 'No permitido' }));
+// Exportar a calendario (.ics): entregas y exámenes pendientes de los próximos meses, con aviso el día anterior. Solo escribe el archivo que eliges.
+const icsTxt = (t) => String(t).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+function construyeIcs(items, hoy) {
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Brain//Entregas//ES', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:Brain · entregas y exámenes'], stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  let n = 0;
+  for (const i of items) {
+    if (!i.fecha || !/^\d{4}-\d{2}-\d{2}$/.test(i.fecha) || i.fecha < hoy || (i.col !== 'todo' && i.col !== 'doing' && i.col !== 'sent') || i.tipo === 'calendario' || i.tipo === 'tarea' || (i.titulo || '').length > 90) continue;
+    const d = i.fecha.replace(/-/g, ''), h = /^\d{1,2}:\d{2}$/.test(i.hora || '') ? i.hora.padStart(5, '0').replace(':', '') + '00' : '';
+    const fin = (() => { const x = new Date(i.fecha + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10).replace(/-/g, ''); })();
+    L.push('BEGIN:VEVENT', `UID:brain-${require('crypto').createHash('sha1').update(i.sigla + '|' + i.fecha + '|' + i.titulo).digest('hex').slice(0, 16)}@brain`, `DTSTAMP:${stamp}`,
+      h ? `DTSTART:${d}T${h}` : `DTSTART;VALUE=DATE:${d}`, h ? `DTEND:${d}T${String(Math.min(23, parseInt(h.slice(0, 2), 10) + 1)).padStart(2, '0')}${h.slice(2)}` : `DTEND;VALUE=DATE:${fin}`,
+      `SUMMARY:${icsTxt(`[${i.sigla}] ${i.titulo}`)}`, `DESCRIPTION:${icsTxt(`${i.tipo ? i.tipo + ' · ' : ''}estado: ${i.col === 'sent' ? 'entregado, pendiente de nota' : i.col === 'doing' ? 'en curso' : 'por hacer'}`)}`,
+      'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Mañana: ' + icsTxt(i.titulo), 'TRIGGER:-P1D', 'END:VALARM', 'END:VEVENT'); n++;
+  }
+  L.push('END:VCALENDAR'); return { texto: L.join('\r\n') + '\r\n', n };
+}
+ipcMain.handle('ics:exportar', async (e) => {
+  if (!fromWin(e) || !vault) return { ok: false, msg: 'No permitido' };
+  try {
+    const d = new Date(), hoy = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, r = dashboard.build(vault, hoy), { texto, n } = construyeIcs(r.items || [], hoy);
+    if (!n) return { ok: false, msg: 'No hay entregas ni exámenes pendientes con fecha para exportar.' };
+    const sel = await dialog.showSaveDialog(win, { title: 'Guardar calendario', defaultPath: path.join(app.getPath('documents'), 'Brain-entregas.ics'), filters: [{ name: 'Calendario (.ics)', extensions: ['ics'] }] });
+    if (sel.canceled || !sel.filePath) return { ok: false, cancelado: true };
+    fs.writeFileSync(sel.filePath, texto, 'utf8'); return { ok: true, ruta: sel.filePath, n };
+  } catch (err) { return { ok: false, msg: String(err.message || err) }; }
+});
+// Guardar una respuesta/resumen de la IA como apunte nuevo (la app pide confirmación antes; ver guardar-apunte.js)
+ipcMain.handle('nota:guardar', (e, d) => {
+  if (!fromWin(e) || !vault || !d || typeof d !== 'object') return { ok: false, msg: 'No permitido' };
+  const asig = L.asignaturasDirs(vault).find(a => a.sigla === String(d.sigla || '').toLowerCase()); if (!asig) return { ok: false, msg: 'Elige una asignatura.' };
+  const hoy = new Date(), iso = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`;
+  const r = require('./guardar-apunte').guardarApunte({ vault, esBrain: L.esBrain(vault), asig, d: { titulo: d.titulo, cuerpo: d.cuerpo, fuentes: d.fuentes, origen: d.origen }, hoy: iso });
+  if (r.ok && win && !win.isDestroyed()) win.webContents.send('vault:changed');
+  return r.ok ? { ok: true, ruta: r.ruta } : r;
+});
+// Diagnóstico: registro local de errores (userData/brain.log) e informe que el usuario puede copiar. No se envía nada.
+const diag = require('./diagnostico'), logFile = () => path.join(app.getPath('userData'), 'brain.log');
+const logError = (tag, e) => diag.logLinea(logFile(), 'error', tag, (e && e.stack) || e);
+process.on('uncaughtException', (e) => logError('main', e));
+process.on('unhandledRejection', (e) => logError('promesa', e));
+let erroresVentana = 0;
+ipcMain.on('log:error', (e, msg) => { if (fromWin(e) && erroresVentana++ < 60) diag.logLinea(logFile(), 'error', 'ventana', String(msg || '').slice(0, 1500)); });
+ipcMain.handle('diag:informe', async (e) => {
+  if (!fromWin(e)) return { ok: false };
+  let campus = ''; try { campus = profile && profile.campusUrl ? new URL(profile.campusUrl).hostname : ''; } catch {}
+  const ia = await asistenteMod.estado().catch(() => null), nt = (cur.ingesta.notasEstado && cur.ingesta.notasEstado()) || {}, bbs = (cur.avisos.state && cur.avisos.state()) || {}, ms = (mensajesMod.state && mensajesMod.state()) || {};
+  const info = { version: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node, plataforma: process.platform, arquitectura: process.arch, so: os_release(), idioma: app.getLocale(),
+    perfil: { tipo: profile ? profiles.tipoDe(profile) : '', modo: vault ? (L.esBrain(vault) ? 'Brain' : 'carpeta libre') : '—', campus, pin: !!(profile && profiles.vista && profiles.vista(profile).hasPin) },
+    estados: { 'Avisos': bbs.status || '—', 'Mensajes': ms.status || '—', 'Notas de Blackboard': nt.status ? `${nt.status}${nt.leido ? ' · leído ' + nt.leido : ''}` : '—' },
+    ia: { 'Gemini (clave guardada)': ia && ia.gemini && ia.gemini.clave ? 'sí' : 'no', 'Ollama': ia && ia.ollama && ia.ollama.ok ? 'en marcha' : 'no detectado' } };
+  return { ok: true, texto: diag.construyeInforme(info, diag.ultimasLineas(logFile(), 40)) };
+});
+ipcMain.handle('diag:carpeta', (e) => { if (fromWin(e)) shell.showItemInFolder(fs.existsSync(logFile()) ? logFile() : app.getPath('userData')); });
+const os_release = () => { try { return require('os').release(); } catch { return ''; } };
+// Actualizaciones: buscar/descargar la versión nueva desde los Releases de GitHub con un token de solo lectura (cifrado con el llavero; nunca llega a la ventana)
+const actualizarMod = require('./actualizar');
+const actFile = () => (profile ? profiles.datos(profile).act : null);
+let actToken = '';   // si no hay llavero: solo en memoria
+const actLee = async () => { let j = {}; try { j = JSON.parse(fs.readFileSync(actFile(), 'utf8')); } catch {} let token = actToken; if (!token && j.token) { try { const { safeStorage } = require('electron'); if (await safeStorage.isAsyncEncryptionAvailable()) token = (await safeStorage.decryptStringAsync(Buffer.from(j.token, 'base64'))).result; } catch {} } return { repo: j.repo || actualizarMod.REPO_DEFECTO, token, propio: !!j.repo }; };
+// Ajustes del perfil que necesita el proceso principal (p. ej. avisar de notas nuevas). Solo claves conocidas.
+const AJUSTES_OK = { avisoNotas: 'boolean', atajoRapido: 'boolean' };
+const TEMAS = { auto: 'system', claro: 'light', oscuro: 'dark' };
+const leeAjustes = () => { let j = {}; try { j = JSON.parse(fs.readFileSync(profiles.datos(profile).ajustes, 'utf8')); } catch {} return { avisoNotas: j.avisoNotas !== false, atajoRapido: j.atajoRapido === true, tema: TEMAS[j.tema] ? j.tema : 'auto' }; };
+const aplicaTema = () => { try { nativeTheme.themeSource = profile ? TEMAS[leeAjustes().tema] : 'system'; } catch {} };   // el tema elegido cambia también el color de la ventana y la preferencia del sistema que ve la página   // avisoNotas: activado salvo que se apague
+ipcMain.handle('ajustes:get', (e) => (fromWin(e) && profile ? { ok: true, ...leeAjustes() } : { ok: false }));
+ipcMain.handle('ajustes:set', (e, patch) => {
+  if (!fromWin(e) || !profile || !patch || typeof patch !== 'object') return { ok: false }; const a = leeAjustes();
+  for (const [k, t] of Object.entries(AJUSTES_OK)) if (typeof patch[k] === t) a[k] = patch[k];
+  if (TEMAS[patch.tema]) a.tema = patch.tema;
+  try { fs.writeFileSync(profiles.datos(profile).ajustes, JSON.stringify(a)); } catch (err) { return { ok: false, msg: String(err.message || err) }; }
+  aplicaTema(); return { ok: true, ...a, atajoOk: aplicaAtajo() };
+});
+// Aviso de notas nuevas: relee las notas de Blackboard cada 3 h (y a los 2 min de abrir) y avisa de las que son nuevas o han cambiado
+async function revisarNotas() {
+  if (!vault || !profile || !cur.ingesta.notasLeer || !leeAjustes().avisoNotas) return;
+  const r = await cur.ingesta.notasLeer(vault).catch(() => null); if (!r || !r.ok || !r.cambios || !r.cambios.length) return;
+  try { if (Notification.isSupported()) { const n = new Notification({ title: r.cambios.length > 1 ? `${r.cambios.length} notas nuevas en Blackboard` : 'Nota nueva en Blackboard', body: r.cambios.slice(0, 3).map(c => `${String(c.sigla).toUpperCase()}: ${c.nombre} → ${c.notaTexto}${c.antes ? ' (antes ' + c.antes + ')' : ''}`).join('\n') }); n.on('click', () => { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); win.webContents.send('ui:notas'); } }); n.show(); } } catch {}
+  if (win && !win.isDestroyed()) win.webContents.send('notas:cambio');
+}
+// Captura rápida (atajo global opcional): ventana pequeña para apuntar una duda o un apunte suelto sin abrir la app entera
+const rapidaMod = require('./rapida'), { globalShortcut } = require('electron');
+let rapidaWin = null; const ATAJO = 'CommandOrControl+Alt+N';
+const dudasInboxFile = () => path.join(app.getPath('userData'), 'dudas-inbox' + (profile && profile.id !== 'default' ? '-' + profile.id : '') + '.json');
+function abreRapida() {
+  if (!profile || !vault) return; if (rapidaWin && !rapidaWin.isDestroyed()) { rapidaWin.show(); rapidaWin.focus(); return; }
+  rapidaWin = new BrowserWindow({ width: 520, height: 300, title: 'Captura rápida', alwaysOnTop: true, autoHideMenuBar: true, minimizable: false, maximizable: false, webPreferences: { preload: path.join(__dirname, 'rapida-preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  rapidaWin.loadFile(path.join(__dirname, 'rapida.html')); rapidaWin.on('closed', () => { rapidaWin = null; });
+}
+function aplicaAtajo() {
+  try { globalShortcut.unregister(ATAJO); } catch {}
+  if (!profile) return false; let ok = false; try { if (leeAjustes().atajoRapido) ok = globalShortcut.register(ATAJO, abreRapida); } catch {} return ok;
+}
+app.on('will-quit', () => { try { globalShortcut.unregisterAll(); } catch {} });
+const deRapida = (e) => rapidaWin && !rapidaWin.isDestroyed() && e.sender === rapidaWin.webContents;
+ipcMain.handle('rapida:asignaturas', (e) => (deRapida(e) && vault ? L.asignaturasDirs(vault).map(a => ({ sigla: a.sigla, nombre: a.nombre })) : []));
+ipcMain.handle('rapida:guardar', (e, d) => {
+  if (!deRapida(e) || !vault || !d) return { ok: false, msg: 'No permitido' }; const texto = String(d.texto || '').trim().slice(0, 8000); if (texto.length < 3) return { ok: false, msg: 'Escribe algo.' };
+  const sigla = String(d.sigla || '').toLowerCase(), asig = sigla ? L.asignaturasDirs(vault).find(a => a.sigla === sigla) : null;
+  if (d.tipo === 'duda') { const hoy = new Date(); rapidaMod.anadeDuda(dudasInboxFile(), { texto: texto.slice(0, 300), sigla: asig ? asig.sigla : '', fecha: `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}` }); if (win && !win.isDestroyed()) win.webContents.send('dudas:inbox'); return { ok: true }; }
+  if (!asig) return { ok: false, msg: 'Elige una asignatura para el apunte rápido.' };
+  const r = rapidaMod.guardaCaptura({ vault, esBrain: L.esBrain(vault), asig, texto }); if (r.ok && win && !win.isDestroyed()) win.webContents.send('vault:changed'); return r;
+});
+ipcMain.on('rapida:cerrar', (e) => { if (deRapida(e)) rapidaWin.close(); });
+ipcMain.handle('rapida:abrir', (e) => { if (fromWin(e)) abreRapida(); });
+ipcMain.handle('dudas:inbox', (e) => (fromWin(e) && profile ? { ok: true, dudas: rapidaMod.sacaDudas(dudasInboxFile()) } : { ok: false, dudas: [] }));
+ipcMain.handle('act:estado', async (e) => { if (!fromWin(e) || !profile) return { ok: false }; const c = await actLee(); return { ok: true, repo: c.repo, token: !!c.token, propio: c.propio, version: app.getVersion(), plataforma: process.platform, empaquetada: app.isPackaged, puedeInstalar: !!instalarMod.zipDeSistema(process.platform, process.arch) }; });
+ipcMain.handle('act:guardar', async (e, d) => {
+  if (!fromWin(e) || !profile || !d) return { ok: false, msg: 'No permitido' };
+  const repo = String(d.repo || '').trim() || actualizarMod.REPO_DEFECTO, prev = await actLee(), token = String(d.token || '').trim() || prev.token;   // el token es opcional (solo para repositorios privados)
+  if (!actualizarMod.REPO_RE.test(repo)) return { ok: false, msg: 'Escribe el repositorio como usuario/repositorio.' };
+  const r = await actualizarMod.buscar({ repo, token, version: app.getVersion(), plataforma: process.platform, arch: process.arch }); if (!r.ok) return r;   // se comprueba con GitHub antes de guardar
+  let cifrado = ''; if (token) { try { const { safeStorage } = require('electron'); if (await safeStorage.isAsyncEncryptionAvailable()) cifrado = (await safeStorage.encryptStringAsync(token)).toString('base64'); } catch {} }
+  try { fs.writeFileSync(actFile(), JSON.stringify({ repo, ...(cifrado ? { token: cifrado } : {}) }), { mode: 0o600 }); } catch {} actToken = cifrado ? '' : token;
+  return { ok: true, persistente: !!cifrado, ...r };
+});
+ipcMain.handle('act:quitar', async (e) => { if (fromWin(e) && profile) { actToken = ''; try { const c = await actLee(); if (c.propio) fs.writeFileSync(actFile(), JSON.stringify({ repo: c.repo }), { mode: 0o600 }); else fs.rmSync(actFile(), { force: true }); } catch {} } return { ok: true }; });   // quita solo el token; el repositorio elegido se conserva
+ipcMain.handle('act:buscar', async (e) => { if (!fromWin(e) || !profile) return { ok: false, msg: 'No permitido' }; const c = await actLee(); return actualizarMod.buscar({ repo: c.repo, token: c.token, version: app.getVersion(), plataforma: process.platform, arch: process.arch }); });
+let actCtl = null;
+ipcMain.handle('act:descargar', async (e, asset) => {
+  if (!fromWin(e) || !profile || actCtl) return { ok: false, msg: actCtl ? 'Ya hay una descarga en curso.' : 'No permitido' };
+  const c = await actLee();
+  actCtl = new AbortController(); let ult = 0;
+  try { return await actualizarMod.descargar({ repo: c.repo, token: c.token, asset: asset && { id: asset.id, name: asset.name, size: asset.size, digest: asset.digest }, carpeta: app.getPath('downloads'), signal: actCtl.signal, onProgreso: (h, t) => { if (win && !win.isDestroyed() && Date.now() - ult > 250) { ult = Date.now(); win.webContents.send('act:progreso', { hecho: h, total: t }); } } }); }
+  finally { actCtl = null; }
+});
+// Instalar la versión descargada (ver instalar.js): ahora (cierra la app, sustituye y reabre) o al cerrar la app. Solo acepta el .zip de este sistema dentro de Descargas.
+const instalarMod = require('./instalar');
+let pendiente = null, instalacionLanzada = false;
+const logInst = () => path.join(app.getPath('userData'), 'brain-update.log');
+const zipPropio = (ruta) => { try { const r = path.resolve(String(ruta || '')), d = path.resolve(app.getPath('downloads')); return r.startsWith(d + path.sep) && instalarMod.ZIP_RE.test(path.basename(r)) ? r : ''; } catch { return ''; } };
+const preparaInstalacion = (ruta, esperada) => instalarMod.preparar({ plat: process.platform, arch: process.arch, zip: ruta, esperada: String(esperada || ''), exe: process.execPath, empaquetada: app.isPackaged, temp: app.getPath('temp') });
+const quitaPendiente = () => { if (pendiente) { try { fs.rmSync(pendiente.stage, { recursive: true, force: true }); } catch {} pendiente = null; } };
+ipcMain.handle('act:instalar', async (e, ruta, esperada) => {
+  if (!fromWin(e) || instalacionLanzada) return { ok: false, msg: 'No permitido' }; const zip = zipPropio(ruta); if (!zip) return { ok: false, msg: 'El fichero no está en Descargas o no es el de este sistema.' };
+  quitaPendiente(); const p = await preparaInstalacion(zip, esperada); if (!p.ok) return p;
+  instalarMod.lanzar({ plat: process.platform, script: p.script, nueva: p.nueva, dest: p.dest, stage: p.stage, pid: process.pid, relanzar: true, log: logInst() }); instalacionLanzada = true;
+  setTimeout(() => app.quit(), 500); return { ok: true };
+});
+ipcMain.handle('act:instalar-al-cerrar', async (e, on, ruta, esperada) => {
+  if (!fromWin(e)) return { ok: false }; quitaPendiente(); if (!on) return { ok: true, on: false };
+  const zip = zipPropio(ruta); if (!zip) return { ok: false, msg: 'El fichero no está en Descargas o no es el de este sistema.' }; const p = await preparaInstalacion(zip, esperada); if (!p.ok) return p; pendiente = p; return { ok: true, on: true };
+});
+app.on('before-quit', () => { if (pendiente && !instalacionLanzada) { instalacionLanzada = true; try { instalarMod.lanzar({ plat: process.platform, script: pendiente.script, nueva: pendiente.nueva, dest: pendiente.dest, stage: pendiente.stage, pid: process.pid, relanzar: false, log: logInst() }); } catch (err) { logError('instalar', err); } } });
+app.whenReady().then(() => instalarMod.limpiaRestos(app.getPath('temp')));
+ipcMain.handle('act:cancelar', (e) => { if (fromWin(e) && actCtl) actCtl.abort(); });
+ipcMain.handle('act:mostrar', (e, ruta) => { if (fromWin(e) && typeof ruta === 'string' && path.resolve(ruta).startsWith(path.resolve(app.getPath('downloads')))) shell.showItemInFolder(ruta); });
+// Guardar/abrir un fichero de texto elegido por el usuario (exportar a Anki, copia de seguridad de los datos de la app). Solo extensiones de texto y hasta 8 MB.
+const EXT_TEXTO = { json: 'JSON', txt: 'Texto', csv: 'CSV', tsv: 'TSV', ics: 'Calendario' };
+ipcMain.handle('texto:guardar', async (e, d) => {
+  if (!fromWin(e) || !d || typeof d.texto !== 'string' || d.texto.length > 8 * 1024 * 1024) return { ok: false, msg: 'No permitido' };
+  const ext = String(d.extension || 'txt').toLowerCase(); if (!EXT_TEXTO[ext]) return { ok: false, msg: 'Tipo de fichero no permitido' };
+  const nombre = String(d.nombre || 'brain.' + ext).replace(/[\\/:*?"<>|]+/g, '-').slice(0, 80);
+  try {
+    const sel = await dialog.showSaveDialog(win, { title: String(d.titulo || 'Guardar').slice(0, 80), defaultPath: path.join(app.getPath('documents'), nombre), filters: [{ name: EXT_TEXTO[ext], extensions: [ext] }] });
+    if (sel.canceled || !sel.filePath) return { ok: false, cancelado: true };
+    fs.writeFileSync(sel.filePath, d.texto, 'utf8'); return { ok: true, ruta: sel.filePath };
+  } catch (err) { return { ok: false, msg: String(err.message || err) }; }
+});
+ipcMain.handle('texto:abrir', async (e, d) => {
+  if (!fromWin(e)) return { ok: false, msg: 'No permitido' }; const ext = String((d && d.extension) || 'json').toLowerCase(); if (!EXT_TEXTO[ext]) return { ok: false, msg: 'Tipo de fichero no permitido' };
+  try {
+    const sel = await dialog.showOpenDialog(win, { title: String((d && d.titulo) || 'Abrir').slice(0, 80), properties: ['openFile'], filters: [{ name: EXT_TEXTO[ext], extensions: [ext] }] });
+    if (sel.canceled || !sel.filePaths[0]) return { ok: false, cancelado: true };
+    const st = fs.statSync(sel.filePaths[0]); if (st.size > 8 * 1024 * 1024) return { ok: false, msg: 'El fichero es demasiado grande.' };
+    return { ok: true, texto: fs.readFileSync(sel.filePaths[0], 'utf8'), nombre: path.basename(sel.filePaths[0]) };
+  } catch (err) { return { ok: false, msg: String(err.message || err) }; }
 });
 ipcMain.handle('ia:cancelar', (e, id) => { if (fromWin(e)) asistenteMod.cancelar(String(id || '')); });
 // Notas del curso leídas de Blackboard (solo lectura); sin Blackboard la pantalla usa las del Brain
@@ -159,7 +362,8 @@ ipcMain.handle('bbi:apply', (e, f, c, d) => (fromWin(e) && vault ? cur.ingesta.a
 ipcMain.handle('bbi:cancel', (e) => { if (fromWin(e)) cur.ingesta.cancelar(); });
 ipcMain.handle('bb:state', () => cur.avisos.state());
 ipcMain.handle('bb:check', (e) => (fromWin(e) ? revisarBB(true) : null));   // revisión manual: sin notificación del sistema, el resultado se ve en pantalla
-ipcMain.handle('bb:login', (e) => { if (fromWin(e)) cur.avisos.abrir(() => revisarBB(true)); });
+// Un único inicio de sesión (desde Ajustes) vale para Avisos, Mensajes, Notas e Ingestar novedades: comparten la sesión del perfil. Al cerrar la ventana se revisa todo y se avisa a la pantalla.
+ipcMain.handle('bb:login', (e) => { if (fromWin(e)) cur.avisos.abrir(() => { revisarBB(true); mensajesMod.check({ silencioso: true, onCambio: avisaMensajes }).then(avisaMensajes).catch(() => {}); if (win && !win.isDestroyed()) win.webContents.send('ui:sesion'); }); });
 ipcMain.handle('bb:seen', (e) => (fromWin(e) ? cur.avisos.marcarVistas() : null));
 
 // ---- Perfiles: inicio de sesión local, alta/edición/baja y selector de carpeta ----
@@ -169,11 +373,13 @@ function activar(p) {
   cur = campusMod.para(profiles.tipoDe(p));
   cur.avisos.init({ campus: p.campusUrl, icalUrl: p.icalUrl || '', partition: d.partition, stateFile: d.bbState, asignaturas: asig });
   cur.ingesta.init({ campus: p.campusUrl, icalUrl: p.icalUrl || '', partition: d.partition, ingestaFile: d.bbIngesta, notasFile: d.notas });
+  asistenteMod.init({ keyFile: d.ia });   // la clave de Gemini es de cada perfil
   mensajesMod.init({ activo: profiles.tipoDe(p) === 'blackboard', campus: p.campusUrl, partition: d.partition, stateFile: d.mensajes, asignaturas: asig });
   cur.ingesta.setProgreso(prog => { if (win && !win.isDestroyed()) win.webContents.send('bbi:progress', prog); });   // progreso de descargas grandes (vídeos)
   setVault(p.vault);
-  timers.push(setTimeout(() => { avisarEntregas(); revisarBB(false); }, 20000), setTimeout(() => revisarMensajes(true), 60000), setInterval(avisarEntregas, 60 * 60 * 1000), setInterval(() => revisarBB(false), 30 * 60 * 1000), setInterval(() => revisarMensajes(false), 30 * 60 * 1000));
+  timers.push(setTimeout(() => { avisarEntregas(); revisarBB(false); }, 20000), setTimeout(() => revisarMensajes(true), 60000), setTimeout(revisarNotas, 120000), setInterval(revisarNotas, 3 * 60 * 60 * 1000), setInterval(avisarEntregas, 60 * 60 * 1000), setInterval(() => revisarBB(false), 30 * 60 * 1000), setInterval(() => revisarMensajes(false), 30 * 60 * 1000));
   lanzaSync();
+  aplicaAtajo(); aplicaTema();
 }
 // git pull del perfil recién activado; si la ventana aún no ha cargado se llama desde did-finish-load
 function lanzaSync() {
@@ -185,6 +391,8 @@ function desactivar() {
   if (term) { try { term.kill(); } catch {} term = null; }
   if (watcher) { try { watcher.close(); } catch {} watcher = null; }
   profile = null; vault = null;
+  if (typeof aplicaAtajo === 'function') { aplicaAtajo(); aplicaTema(); }   // sin perfil activo no hay atajo global ni tema propio
+  if (typeof rapidaWin !== 'undefined' && rapidaWin && !rapidaWin.isDestroyed()) rapidaWin.close();
 }
 const estadoPerfiles = () => ({ profiles: profiles.lista(), current: profile ? profile.id : null, last: profiles.ultimo(), active: profile ? profiles.vista(profile) : null });
 const ok = (extra) => ({ ok: true, ...extra }), ko = (e) => ({ ok: false, msg: String(e && e.message || e) });
@@ -445,10 +653,34 @@ app.whenReady().then(() => {
   ]));
   // Un único perfil sin PIN entra solo (antes de abrir la ventana, para que la interfaz ya lo encuentre activo);
   // con varios perfiles, o con PIN, la persona elige quién es y, si hace falta, pone su PIN
-  const l = profiles.lista(), auto = l.length === 1 && !l[0].hasPin && profiles.esDir(l[0].vault) ? profiles.buscar(l[0].id) : null;
+  let l = profiles.lista(), auto = l.length === 1 && !l[0].hasPin && profiles.esDir(l[0].vault) ? profiles.buscar(l[0].id) : null;
+  if (HUMO && process.env.BRAIN_HUMO_BRAIN) { const p = profiles.crear({ name: 'Humo', vault: process.env.BRAIN_HUMO_BRAIN, campusUrl: '' }); auto = profiles.buscar(p.id); }
   if (auto) activar(auto);
   createWindow();
-  if (auto) win.webContents.once('did-finish-load', lanzaSync);
+  if (auto && !HUMO) win.webContents.once('did-finish-load', lanzaSync);
+  if (HUMO) prueba_humo();
   app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
 });
 app.on('window-all-closed', () => app.quit());
+// ---- prueba de arranque: carga la interfaz real, recorre las pantallas y comprueba que no hay errores de la ventana ni del proceso ----
+function prueba_humo() {
+  const errores = [], fin = (ok, msg) => { console.log((ok ? 'HUMO_OK ' : 'HUMO_FALLO ') + msg); app.exit(ok ? 0 : 1); };
+  setTimeout(() => fin(false, 'tiempo agotado (60 s)'), 60000);
+  win.webContents.on('console-message', (_e, nivel, msg, linea, fuente) => { if (nivel >= 3) errores.push(`${String(fuente).split('/').pop()}:${linea} ${msg}`.slice(0, 200)); });
+  win.webContents.on('render-process-gone', (_e, d) => fin(false, 'se cayó la ventana: ' + d.reason));
+  process.on('uncaughtException', (e) => errores.push('proceso: ' + (e && e.message)));
+  win.webContents.once('did-finish-load', async () => {
+    try {
+      const js = (c) => win.webContents.executeJavaScript(c), esp = (ms) => new Promise(r => setTimeout(r, ms)); await esp(2500);
+      const r = { apuntes: await js('notes.length'), arbol: await js("document.querySelectorAll('#tree .it').length"), pantallas: {} };
+      for (const [n, f] of [['inicio', 'home()'], ['notas', 'showNotas()'], ['preguntar', 'showPreguntar()'], ['ajustes', 'showAjustes()'], ['plan', 'showPlan()'], ['dudas', 'showDudas()'], ['estudiar', 'showStudy()'], ['horario', 'showHorario()'], ['avisos', 'showAvisos()'], ['dashboard', 'showDash()'], ['mensajes', 'showMensajes()']]) { await js(f); await esp(500); r.pantallas[n] = await js("document.querySelector('#doc').textContent.length"); }
+      await js("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))"); await esp(200); r.paleta = await js("!!document.querySelector('.pal')");
+      const vacias = Object.entries(r.pantallas).filter(([, n]) => !n).map(([k]) => k);
+      if (!r.apuntes || !r.arbol) return fin(false, 'no cargó los apuntes: ' + JSON.stringify(r));
+      if (vacias.length) return fin(false, 'pantallas vacías: ' + vacias.join(', '));
+      if (!r.paleta) return fin(false, 'la paleta no se abre');
+      if (errores.length) return fin(false, 'errores: ' + errores.slice(0, 5).join(' || '));
+      fin(true, JSON.stringify(r));
+    } catch (e) { fin(false, 'excepción: ' + (e && e.message)); }
+  });
+}

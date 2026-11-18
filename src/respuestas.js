@@ -16,7 +16,7 @@ const RESP = (() => {
   function trocea(notes, sigla) {
     const out = [], S = String(sigla || '').toUpperCase();
     for (const n of notes) {
-      if (!n || n.externo || !n.body || (S && String(n.sigla).toUpperCase() !== S)) continue;
+      if (!n || !n.body || (S && String(n.sigla).toUpperCase() !== S)) continue;
       let cab = '', buf = '';
       const cierra = () => { const t = buf.trim(); if (t.length > 40) out.push({ path: n.path, titulo: tituloDe(n), sigla: String(n.sigla).toUpperCase(), cab, texto: t, borrador: !!n.borrador }); buf = ''; };
       for (const l of n.body.split('\n')) {
@@ -44,7 +44,7 @@ const RESP = (() => {
     const Q = new Set(toks(consulta)), S = String(sigla || '').toUpperCase(), out = [];
     if (!Q.size) return out;
     for (const n of notes) {
-      if (!n || n.externo || !n.body || (S && String(n.sigla).toUpperCase() !== S)) continue;
+      if (!n || !n.body || (S && String(n.sigla).toUpperCase() !== S)) continue;
       let skip = false;
       for (const l of n.body.split('\n')) {
         if (/^#{1,4}\s/.test(l)) { skip = /^#{1,4}\s*(Dudas|Fuentes|Relaci[oó]n con la evaluaci)/i.test(l); continue; }

@@ -36,7 +36,7 @@ async function load() {
   for (const n of notes) n.hay = norm(n.title + '\n' + n.body);
   q.value ? search(q.value) : buildTree();
   loadDash(); loadBB(); loadMsgs(); if (!statusIniciado) { statusIniciado = true; refreshStatus(); }   // primer chequeo del LED aunque no haya llegado ningún evento de sincronización
-  if (view === 'dash' || view === 'study' || view === 'avisos' || view === 'horario' || view === 'mensajes' || view === 'notas' || view === 'preguntar') {} else if (current && byPath.has(current)) show(current); else if (!current) home();
+  if (view === 'dash' || view === 'study' || view === 'avisos' || view === 'horario' || view === 'mensajes' || view === 'notas' || view === 'preguntar' || view === 'ajustes' || view === 'plan' || view === 'dudas') {} else if (current && byPath.has(current)) show(current); else if (!current) home();
 }
 
 function buildTree() {
@@ -63,11 +63,11 @@ function buildTree() {
 }
 const markOn = () => document.querySelectorAll('.it[data-p]').forEach(i => i.classList.toggle('on', i.dataset.p === current));
 
-function go(p) {
+function go(p, destino) {
   const nn = byPath.get(p); if (nn && nn.externo) { window.brain.openFile(p); return; }   // PDF, Word… se abren con su aplicación
-  hist = hist.slice(0, hp + 1); hist.push(p); hp = hist.length - 1; show(p); }
+  hist = hist.slice(0, hp + 1); hist.push(p); hp = hist.length - 1; show(p); if (destino && typeof resaltaDestino === 'function') resaltaDestino(destino); }
 function goSubject(s) { hist = hist.slice(0, hp + 1); hist.push('@' + s); hp = hist.length - 1; subject(s); }
-function nav(d) { const i = hp + d; if (i < 0 || i >= hist.length) return; hp = i; const h = hist[hp]; h === '@study' ? showStudy(false) : h === '@dash' ? showDash(false) : h === '@avisos' ? showAvisos(false) : h === '@mensajes' ? showMensajes(false) : h === '@horario' ? showHorario(false) : h === '@preguntar' ? showPreguntar(false) : h === '@notas' ? showNotas(false) : h === '@home' ? home() : h[0] === '@' ? subject(h.slice(1)) : show(h); }
+function nav(d) { const i = hp + d; if (i < 0 || i >= hist.length) return; hp = i; const h = hist[hp]; h === '@study' ? showStudy(false) : h === '@dash' ? showDash(false) : h === '@avisos' ? showAvisos(false) : h === '@mensajes' ? showMensajes(false) : h === '@horario' ? showHorario(false) : h === '@preguntar' ? showPreguntar(false) : h === '@notas' ? showNotas(false) : h === '@ajustes' ? showAjustes(false) : h === '@plan' ? showPlan(false) : h === '@dudas' ? showDudas(false) : h === '@home' ? home() : h[0] === '@' ? subject(h.slice(1)) : show(h); }
 const btns = () => { $('#back').disabled = hp <= 0; $('#fwd').disabled = hp >= hist.length - 1; };
 
 function resolve(target) {
@@ -94,6 +94,7 @@ function show(p) {
   const c = (r) => (n.body.match(r) || []).length, v = c(/\[verificado\]/g), su = c(/\[supuesto\]/g), pe = c(/\[pendiente\]/gi);
   if (v) m.append(el('span', 'tag ok', `${v} verificado`)); if (su) m.append(el('span', 'tag', `${su} supuesto`)); if (pe) m.append(el('span', 'tag pe', `${pe} pendiente`));
   doc.append(m);
+  if (typeof apunteAcciones === 'function') apunteAcciones(n);   // resumen y test con IA (opcional, escritorio)
   const body = el('div'); body.innerHTML = render(n.body); doc.append(...body.childNodes);
   const re = new RegExp('\\[\\[(?:[^\\]|]*/)?' + n.base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:\\.md)?(?:[#|][^\\]]*)?\\]\\]', 'i');
   const bl = notes.filter(o => o.path !== p && re.test(o.body));
@@ -121,6 +122,7 @@ function home() {
   view = 'notes'; current = null; if (hist[hp] !== '@home') { hist = hist.slice(0, hp + 1); hist.push('@home'); hp = hist.length - 1; }
   $('#crumb').textContent = ''; btns(); markOn(); doc.replaceChildren();
   doc.append(el('h1', null, 'Apuntes'), el('p', 'lead', `${notes.length} apuntes de ${Object.keys(NOMBRES).length} asignaturas`));
+  if (typeof hoyToca === 'function') hoyToca();
   const grid = el('div', 'home');
   for (const s of Object.keys(NOMBRES)) {
     const k = notes.filter(n => sigOf(n) === s).length;
@@ -148,7 +150,7 @@ q.addEventListener('keydown', (e) => { if (e.key === 'Escape') { q.value = ''; b
 $('#hbtn').onclick = () => { if (q.value) { q.value = ''; buildTree(); } home(); };   // Inicio: pantalla principal con las asignaturas
 $('#back').onclick = () => nav(-1); $('#fwd').onclick = () => nav(1);
 window.brain.onChanged(() => { load(); refreshStatus(); });
-window.brain.onSearch(() => { q.focus(); q.select(); });
+window.brain.onSearch(() => { if (typeof paleta === 'function') paleta(); else { q.focus(); q.select(); } });   // Cmd/Ctrl+K (atajo del menú): paleta de búsqueda global
 
 // ---- LED de sincronización con GitHub ----
 // verde = idéntico a GitHub · ámbar = hay novedades en GitHub o apuntes sin subir · rojo = sin conexión · parpadeo = comprobando
@@ -229,7 +231,7 @@ const COLS = [['todo', 'Por hacer'], ['doing', 'En curso'], ['sent', 'Entregado'
 let dashFilter = 'ALL', dashMsg = null;
 const fdate = (d) => d ? new Date(d + 'T00:00').toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : 'sin fecha';
 async function loadDash() { try { dash = await window.brain.dashData(); } catch (e) { dash = { error: String(e) }; } updateBell(); if (view === 'dash') drawDash(); else if (view === 'avisos') drawAvisos(); else if (view === 'horario') drawHorario(); else if (view === 'notas') drawNotas(); }
-async function loadBB() { try { bb = await window.brain.bbState(); } catch { bb = null; } updateBell(); if (view === 'dash') drawDash(); else if (view === 'avisos') drawAvisos(); }
+async function loadBB() { try { bb = await window.brain.bbState(); } catch { bb = null; } updateBell(); if (view === 'dash') drawDash(); else if (view === 'avisos') drawAvisos(); else if (view === 'ajustes') pintaSesion(); if (typeof hoyToca === 'function') hoyToca(true); }
 const diasHasta = (f) => Math.round((new Date(f + 'T00:00') - new Date(dash.hoy + 'T00:00')) / 864e5);
 const cercanas = () => dash && dash.items ? dash.items.filter(i => (i.col === 'todo' || i.col === 'doing') && i.fecha && diasHasta(i.fecha) >= 0 && diasHasta(i.fecha) <= 7) : [];
 // Avisos «sin ver»: una entrega cercana avisa una vez por tramo (7 días, 3, 1 y hoy), igual que la notificación del sistema; al abrir Avisos se marca como vista y la campana se apaga
@@ -279,7 +281,7 @@ function drawAvisos() {
   h.append(el('i', 'led ' + cls), el('b', null, campusNombre()), document.createTextNode(bb ? `${bb.msg}${bb.lastCheck ? ' · revisado ' + new Date(bb.lastCheck).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : ''}` : 'Cargando…'));
   const b1 = el('button', null, 'Revisar ahora'); b1.onclick = async () => { b1.disabled = true; b1.textContent = 'Revisando…'; await window.brain.bbCheck(); loadBB(); };
   const sinCampus = bb && bb.status === 'sin-campus';
-  const b2 = el('button', null, sinCampus ? (esIcal() ? 'Añadir dirección del calendario' : 'Añadir URL del campus') : bb && bb.status === 'ok' ? 'Abrir ' + campusNombre() : 'Iniciar sesión en ' + campusNombre()); b2.onclick = () => (sinCampus && typeof editarPerfil === 'function' ? editarPerfil() : window.brain.bbLogin());
+  const b2 = el('button', null, sinCampus ? (esIcal() ? 'Añadir dirección del calendario' : 'Añadir URL del campus') : bb && bb.status === 'ok' ? 'Abrir ' + campusNombre() : 'Iniciar sesión (⚙ Ajustes)'); b2.onclick = () => (sinCampus && typeof editarPerfil === 'function' ? editarPerfil() : bb && bb.status === 'ok' ? window.brain.bbLogin() : showAjustes());
   const b4 = el('button', null, '⬇ Ingestar novedades…'); b4.onclick = abrirIngesta;
   h.append(b1); if (!esIcal() || sinCampus) h.append(b2); h.append(b4);
   box.append(h);
@@ -383,6 +385,7 @@ $('#hobtn').onclick = () => showHorario();
 $('#msgbtn').onclick = () => showMensajes();
 $('#rbtn').onclick = () => showPreguntar();
 $('#ntbtn').onclick = () => showNotas();
+$('#setbtn').onclick = () => showAjustes();
 if (window.brain.onIaTrozo) window.brain.onIaTrozo(iaTrozo);
 window.brain.onMensajesChanged(loadMsgs); window.brain.onMensajes(() => showMensajes());
 // ---- Horario: semana por días y franjas, leído de 01-Curso/calendario*.md (celdas «AAAA-MM-DD SIGLA») y de las franjas «Bloque 1: 17:30 – 20:00» de 01-Curso/curso.md. Solo lectura ----
@@ -418,6 +421,7 @@ async function cargaHorario() {
   if (r && r.ok && r.cal) { try { hor = { ok: true, ...parseHorario(r.cal, r.curso), fuente: r.fuente }; } catch (e) { hor = { ok: false, msg: 'No se pudo leer el calendario: ' + e.message }; } }
   else hor = { ok: false, msg: (r && r.msg) || 'Sin calendario' };
   if (view === 'horario') drawHorario();
+  if (typeof hoyToca === 'function') hoyToca(true);
 }
 function showHorario(push = true) {
   view = 'horario'; current = null;
@@ -468,15 +472,15 @@ function updateMsgBtn() { const b = $('#msgbtn'); if (!b) return; b.replaceChild
 async function loadMsgs() {
   try { msgs = await window.brain.mensajesState(); } catch { msgs = null; }
   if (msgs && (msgs.ok === false || !msgs.status)) msgs = null;   // en el móvil no hay mensajes: el botón va oculto
-  updateMsgBtn(); if (view === 'mensajes') drawMensajes();
+  updateMsgBtn(); if (view === 'mensajes') redibujaMsgsFondo();
 }
 async function refrescaMsgs() {
-  if (msgLeyendo) return; msgLeyendo = true; drawMensajes();
+  if (msgLeyendo) return; msgLeyendo = true; redibujaMsgsFondo();
   try { const r = await window.brain.mensajesCheck(); if (r && r.status) msgs = r; } catch {}
-  msgLeyendo = false; updateMsgBtn(); if (view === 'mensajes') drawMensajes();
+  msgLeyendo = false; updateMsgBtn(); if (view === 'mensajes') redibujaMsgsFondo();
 }
 function showMensajes(push = true) {
-  view = 'mensajes'; current = null; msgHilo = null; if (msgNuevo) { msgNuevo = null; try { window.brain.mensajesCerrarRedaccion(); } catch {} }
+  view = 'mensajes'; current = null; msgHilo = null;   // un mensaje a medias NO se descarta al salir y volver (ni al pulsar la notificación): se cierra con «Cancelar» o «Volver a Mensajes»
   if (push && hist[hp] !== '@mensajes') { hist = hist.slice(0, hp + 1); hist.push('@mensajes'); hp = hist.length - 1; }
   $('#crumb').textContent = 'Mensajes'; btns(); markOn(); drawMensajes();
   loadMsgs().then(() => { if (msgs && !['no-aplica', 'sin-campus', 'login'].includes(msgs.status) && (!msgs.lastCheck || Date.now() - new Date(msgs.lastCheck) > 5 * 60000)) refrescaMsgs(); });   // al abrir: lo guardado al instante y, si tiene más de 5 min, se vuelve a leer
@@ -487,6 +491,7 @@ function drawMensajes() {
   const keep = doc.scrollTop; doc.replaceChildren(); $('#crumb').textContent = 'Mensajes';
   const head = el('div', 'dh'); head.append(el('h1', null, 'Mensajes')); doc.append(head);
   if (!msgs) { doc.append(el('p', 'dsub', 'Los mensajes de Blackboard solo están en la app de escritorio.')); return; }
+  if (typeof bannerBorrador === 'function') { const bb2 = bannerBorrador(); if (bb2) doc.append(bb2); }
   const box = el('div', 'av'), h = el('div', 'bbhead'), st = msgs.status;
   const cls = msgLeyendo ? 'busy' : st === 'ok' ? 'ok' : ['login', 'nunca', 'sin-campus', 'no-aplica'].includes(st) ? 'warn' : 'err';
   const hora = msgs.lastCheck ? ' · revisado ' + new Date(msgs.lastCheck).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -494,7 +499,7 @@ function drawMensajes() {
   if (!['no-aplica', 'sin-campus'].includes(st)) {
     const bAct = el('button', null, msgLeyendo ? 'Leyendo…' : 'Actualizar'); bAct.disabled = msgLeyendo; bAct.onclick = refrescaMsgs; h.append(bAct);
     if (cursosMsg().length && st !== 'login') { const bn = el('button', 'pri', '✉ Nuevo mensaje'); bn.onclick = () => abrirNuevo(); h.append(bn); }
-    if (st === 'login' || st === 'nunca') { const bL = el('button', null, 'Iniciar sesión en Blackboard'); bL.onclick = () => window.brain.mensajesLogin(); h.append(bL); }
+    if (st === 'login' || st === 'nunca') { const bL = el('button', null, 'Iniciar sesión (⚙ Ajustes)'); bL.onclick = () => showAjustes(); h.append(bL); }
   }
   box.append(h); doc.append(box);
   const cursos = [...(msgs.cursos || [])], ult = (c) => (c.conversaciones[0] && c.conversaciones[0].actualizada) || '';
@@ -536,8 +541,8 @@ function drawHilo() {
   bar.append(back, el('b', null, H.titulo), ab); doc.append(bar);
   if (H.cargando) { doc.append(el('p', 'dsub', 'Abriendo la conversación en Blackboard… puede tardar unos segundos.')); return; }
   if (H.error) {
-    doc.append(el('p', 'dsub', H.error)); const b = el('button', null, H.login ? 'Iniciar sesión en Blackboard' : 'Reintentar');
-    b.onclick = () => (H.login ? window.brain.mensajesLogin() : abrirHilo({ courseId: H.courseId, sigla: '', nombre: H.titulo.split(' · ')[0] }, { id: H.convId, remitente: H.titulo.split(' · ').slice(1).join(' · ') }, true)); doc.append(b); return;
+    doc.append(el('p', 'dsub', H.error)); const b = el('button', null, H.login ? 'Iniciar sesión (⚙ Ajustes)' : 'Reintentar');
+    b.onclick = () => (H.login ? showAjustes() : abrirHilo({ courseId: H.courseId, sigla: '', nombre: H.titulo.split(' · ')[0] }, { id: H.convId, remitente: H.titulo.split(' · ').slice(1).join(' · ') }, true)); doc.append(b); return;
   }
   const d = H.data;
   if (d.participantes && d.participantes.length) doc.append(el('p', 'dsub', 'Personas en la conversación: ' + d.participantes.join(', ')));
@@ -551,6 +556,8 @@ function drawHilo() {
   doc.scrollTop = keep;
 }
 // ---- Mensaje nuevo: asignatura, destinatarios, texto → pantalla de confirmación → envío por la redacción de Blackboard (ver mensajes.js) ----
+// Los refrescos de fondo (revisión cada 30 min, relectura, nueva sesión) no redibujan el formulario «Nuevo mensaje» mientras lo estás editando: se perdía el foco, la búsqueda de destinatarios y lo que ibas escribiendo
+const redibujaMsgsFondo = () => { if (msgNuevo && msgNuevo.fase === 'editar') return; drawMensajes(); };
 let msgNuevo = null;   // { courseId, dest: [{ id, nombre, rol }], texto, copia, fase: 'editar' | 'confirmar' | 'enviando' | 'hecho', res }
 const cursosMsg = () => (msgs && msgs.cursos ? msgs.cursos.filter(c => c.habilitado !== false) : []);
 const nombreCursoMsg = (c) => NOMBRES[c.sigla.toLowerCase()] || (c.nombre || '').replace(/\s*\([^)]*\)\s*$/, '') || c.sigla;
@@ -558,7 +565,7 @@ function abrirNuevo(courseId) {
   const cs = cursosMsg(); if (!cs.length) return;
   msgHilo = null; msgNuevo = { courseId: (courseId && cs.some(c => c.courseId === courseId)) ? courseId : cs[0].courseId, dest: [], texto: '', copia: false, fase: 'editar' }; drawMensajes();
 }
-function cierraNuevo() { msgNuevo = null; try { window.brain.mensajesCerrarRedaccion(); } catch {} drawMensajes(); }
+function cierraNuevo() { msgNuevo = null; if (typeof borraBorrador === 'function') borraBorrador(); try { window.brain.mensajesCerrarRedaccion(); } catch {} drawMensajes(); }
 function drawNuevo() {
   const keep = doc.scrollTop, N = msgNuevo; doc.replaceChildren(); $('#crumb').textContent = 'Mensajes';
   const head = el('div', 'dh'); head.append(el('h1', null, 'Nuevo mensaje')); doc.append(head);
@@ -574,7 +581,7 @@ function drawNuevo() {
     if (ok) { const b = el('button', 'pri', 'Volver a Mensajes'); b.onclick = cierraNuevo; row.append(b); }
     else {
       const b1 = el('button', 'pri', 'Volver al mensaje'); b1.onclick = () => { N.fase = 'editar'; drawMensajes(); }; row.append(b1);
-      if (r.login) { const bl = el('button', null, 'Iniciar sesión en Blackboard'); bl.onclick = () => window.brain.mensajesLogin(); row.append(bl); }
+      if (r.login) { const bl = el('button', null, 'Iniciar sesión (⚙ Ajustes)'); bl.onclick = () => showAjustes(); row.append(bl); }
       const bc = el('button', null, 'Descartar'); bc.onclick = cierraNuevo; row.append(bc);
     }
     box.append(row); doc.append(box); return;
@@ -589,7 +596,8 @@ function drawNuevo() {
     b2.onclick = async () => {
       b2.disabled = b1.disabled = true; N.fase = 'enviando'; drawMensajes();
       let r; try { r = await window.brain.mensajesEnviar({ courseId: N.courseId, destinatarios: N.dest.map(d => ({ id: d.id, nombre: d.nombre })), texto: N.texto, copia: N.copia }); } catch (e) { r = { ok: false, enviado: 'desconocido', msg: 'Error: ' + String(e.message || e) + '. Comprueba en Blackboard antes de volver a enviarlo.' }; }
-      if (!msgNuevo) return; N.fase = 'hecho'; N.res = r || { ok: false, enviado: false, msg: 'Sin respuesta' }; drawMensajes();
+      if (!msgNuevo) return; N.fase = 'hecho'; N.res = r || { ok: false, enviado: false, msg: 'Sin respuesta' }; if (r && r.ok && r.enviado !== false && typeof borraBorrador === 'function') borraBorrador();   // enviado (o no confirmado): el borrador ya no debe reaparecer; si no se envió, se conserva
+      drawMensajes();
     };
     row.append(b1, b2); box.append(row); doc.append(box); return;
   }
@@ -601,7 +609,7 @@ function drawNuevo() {
   const pintaChips = () => { chips.replaceChildren(); if (!N.dest.length) chips.append(el('span', 'dsub', 'Nadie todavía: busca por nombre o apellidos.')); for (const d of N.dest) { const c = el('span', 'msg-chip', d.nombre + (d.rol ? ' · ' + d.rol : '')), x = el('button', null, '✕'); x.title = 'Quitar'; x.onclick = () => { N.dest = N.dest.filter(y => y.id !== d.id); pintaChips(); pintaBoton(); pintaRes(N.ultimos || []); }; c.append(x); chips.append(c); } };
   const pintaRes = (lista) => { N.ultimos = lista; res.replaceChildren(); for (const p of lista) { const ya = N.dest.some(d => d.id === p.id), r = el('div', 'msg-r' + (ya ? ' ya' : '')); r.append(el('b', null, p.nombre), el('span', null, [p.rol, p.usuario].filter(Boolean).join(' · ') + (ya ? ' · añadido' : ''))); if (!ya) r.onclick = () => { N.dest.push({ id: p.id, nombre: p.nombre, rol: p.rol }); pintaChips(); pintaBoton(); pintaRes(lista); }; res.append(r); } };
   let t = null, serie = 0;
-  q.placeholder = 'Buscar por nombre o apellidos (mínimo 2 letras)…'; q.autocomplete = 'off';
+  q.placeholder = 'Buscar por nombre o apellidos (mínimo 2 letras)…'; q.autocomplete = 'off'; q.value = N.busqueda || ''; q.addEventListener('input', () => { N.busqueda = q.value; });   // la búsqueda se conserva al volver a editar
   q.oninput = () => {
     clearTimeout(t); const v = q.value.trim(); if (v.length < 2) { estado.textContent = ''; pintaRes([]); return; }
     t = setTimeout(async () => {
@@ -618,6 +626,7 @@ function drawNuevo() {
   ta.oninput = () => { N.texto = ta.value; pintaCont(); pintaBoton(); };
   const cb = el('input'); cb.type = 'checkbox'; cb.checked = N.copia; cb.onchange = () => { N.copia = cb.checked; };
   const lab = el('label', 'msg-chk'); lab.append(cb, document.createTextNode(' Enviar también una copia por correo electrónico a los destinatarios'));
+  if (typeof borradorIA === 'function') box.append(borradorIA(ta, N, () => { pintaCont(); pintaBoton(); }));   // borrador con IA (opcional): rellena el texto, nunca envía
   box.append(ta, cont, lab);
   const row = el('div', 'row'), bc = el('button', null, 'Cancelar'), br = el('button', 'pri', 'Revisar y enviar');
   bc.onclick = cierraNuevo; br.onclick = () => { N.texto = ta.value.trim(); N.copia = cb.checked; N.fase = 'confirmar'; drawMensajes(); };
@@ -644,7 +653,7 @@ async function abrirIngesta() {
   ing = { fase: 'leyendo', msg: `Leyendo ${campusNombre()} (cursos, ficheros, calificaciones y plazos)… puede tardar un minuto.`, sel: new Set(), bajados: [] };
   drawAvisos(); scrollIng();
   const r = await window.brain.bbiScan(); if (!ing) return; ing.r = r;
-  if (!r.ok) { ing.fase = 'error'; ing.msg = r.login ? `Hace falta iniciar sesión en ${campusNombre()} (botón «Iniciar sesión en ${campusNombre()}»).` : `No se pudo leer ${campusNombre()}: ` + r.msg; }
+  if (!r.ok) { ing.fase = 'error'; ing.msg = r.login ? `Hace falta iniciar sesión en ${campusNombre()} (⚙ Ajustes → Sesión del campus).` : `No se pudo leer ${campusNombre()}: ` + r.msg; }
   else {
     ing.fase = 'lista';
     for (const f of r.ficheros) {   // marcado por defecto: lo que aún no tienes; los vídeos grandes o de tamaño desconocido no se marcan solos
@@ -716,7 +725,8 @@ async function pideClaude() {
   window.brain.termWrite('claude "Ingesta los ficheros nuevos que acabo de descargar del campus en la carpeta _entrada de cada asignatura: ' + lista + '. Sigue las reglas del CLAUDE.md: un apunte por tema en apuntes con la plantilla tema, una ficha de recurso en recursos, actualiza la ficha de la asignatura y añade la entrada en 04-IA/registro.md. No leas 99-Privado. Marca como supuesto lo que no salga del documento."\r');
 }
 $('#nbtn').onclick = () => showAvisos();
-window.brain.onBBChanged(loadBB); window.brain.onAvisos(() => showAvisos());
+window.brain.onBBChanged(loadBB);
+window.brain.onSesion(() => { loadBB(); if (ntLogin) { ntLogin = false; if (view === 'notas') leeNotasBB(); } if (view === 'mensajes') refrescaMsgs(); }); window.brain.onAvisos(() => showAvisos());
 
 // ---- Terminal integrada (xterm.js + node-pty) ----
 const tPanel = $('#term'), tBody = $('#tbody'); let xt = null, fit = null, started = false;
@@ -766,6 +776,7 @@ $('#tgrip').addEventListener('mousedown', (e) => {
 // ---------- Notas del curso: por asignatura y, dentro de cada una, exámenes/tests y trabajos/prácticas ----------
 // Fuente principal: el libro de calificaciones de Blackboard (lo lee el proceso principal con la sesión del perfil, solo lectura).
 // Sin Blackboard (otro campus, carpeta libre, móvil) se usan las notas anotadas en el Brain a través del dashboard. La media es simple, sin ponderar.
+let ntAbiertos = new Set(), ntRedibujar = false;   // paneles «Qué nota necesito» abiertos y si hay un redibujado aplazado (no se redibuja mientras escribes en uno)
 let ntSigla = '', ntSolo = false, ntBB = null, ntLeyendo = false, ntMsg = '', ntLogin = false;
 const ntEsExamen = (i) => i.tipo === 'examen' || i.tipo === 'test' || /\b(examen|parcial|test|prueba|quiz)\b/i.test(i.titulo);
 const ntEstado = (i) => i.estadoTxt || (i.col === 'done' ? (i.nota != null ? 'Calificado' : 'Corregido (sin nota anotada)') : i.col === 'sent' ? 'Entregado · pendiente de nota' : i.col === 'doing' ? 'En curso' : (i.vencida ? 'Vencido sin entregar' : 'Por hacer'));
@@ -790,23 +801,25 @@ async function leeNotasBB() {
 // Filas con la misma forma sea cual sea la fuente
 function ntItems() {
   if (ntHayBB()) {
-    const out = []; for (const c of ntBB.cursos) for (const f of c.filas) {
+    const out = [], uc = ntBB.ultimosCambios, nuevas = new Set(uc && uc.lista && Date.now() - new Date(uc.fecha) < 7 * 864e5 ? uc.lista.map(x => x.sigla + '|' + x.nombre) : []);   // 🆕: nota nueva o cambiada en la última lectura con cambios (hasta 7 días)
+    for (const c of ntBB.cursos) for (const f of c.filas) {
       const ok = f.nota != null && f.max, est = f.estado || (f.sinCalificar ? 'Sin calificar' : '');
-      out.push({ sigla: String(c.sigla).toUpperCase(), titulo: f.nombre, fecha: f.fecha || '', tipo: '', peso: '', nota: ok ? f.nota : null, max: ok ? f.max : null, notaTexto: ok ? f.notaTexto : '', completa: !!f.completa && !ok, estadoTxt: f.completa && !ok ? 'Calificado (completo, sin nota numérica)' : est, col: ok || f.completa ? 'done' : /Enviado|Entregado|Necesita calificaci/i.test(est) ? 'sent' : /En curso|Borrador/i.test(est) ? 'doing' : 'todo' });
+      out.push({ sigla: String(c.sigla).toUpperCase(), titulo: f.nombre, fecha: f.fecha || '', tipo: '', peso: '', nota: ok ? f.nota : null, max: ok ? f.max : null, notaTexto: ok ? f.notaTexto : '', nuevo: nuevas.has(c.sigla + '|' + f.nombre), completa: !!f.completa && !ok, estadoTxt: f.completa && !ok ? 'Calificado (completo, sin nota numérica)' : est, col: ok || f.completa ? 'done' : /Enviado|Entregado|Necesita calificaci/i.test(est) ? 'sent' : /En curso|Borrador/i.test(est) ? 'doing' : 'todo' });
     }
     return out;
   }
   return dash && dash.items ? dash.items.filter(i => i.tipo !== 'calendario' && i.tipo !== 'tarea' && i.titulo && i.titulo.length <= 90) : [];   // Brain: solo entregas y exámenes (fuera avisos del calendario, tareas de apuntes y líneas largas que no son una entrega)
 }
 function drawNotas() {
+  if (document.activeElement && document.activeElement.closest && document.activeElement.closest('.nt-calc')) { ntRedibujar = true; return; }   // estás escribiendo en un panel: no se redibuja hasta que salgas
   const keep = doc.scrollTop; doc.replaceChildren(); $('#crumb').textContent = 'Notas';
-  const head = el('div', 'dh'); head.append(el('h1', null, 'Notas del curso')); doc.append(head);
+  const head = el('div', 'dh'); head.append(el('h1', null, 'Notas del curso')); if (typeof botonOcultarNotas === 'function') head.append(botonOcultarNotas()); doc.append(head);
   const bb = ntBB && ['ok', 'nunca'].includes(ntBB.status), hayBB = ntHayBB();
   if (bb) {   // barra de estado de Blackboard
     const bar = el('div', 'ia-bar'), cls = ntLeyendo ? 'busy' : ntLogin ? 'warn' : ntMsg ? 'err' : hayBB ? 'ok' : 'warn';
     const hora = ntBB.leido ? 'leído ' + new Date(ntBB.leido).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'sin leer todavía';
     bar.append(el('i', 'led ' + cls), el('b', null, 'Blackboard'), el('span', 'ia-mut', ntLeyendo ? 'Leyendo tus notas…' : (ntMsg || hora)));
-    if (ntLogin) { const l = el('button', 'pri', 'Iniciar sesión'); l.onclick = () => { try { window.brain.bbLogin(); } catch {} }; const r = el('button', null, 'Reintentar'); r.onclick = () => { ntLogin = false; leeNotasBB(); }; bar.append(l, r); }
+    if (ntLogin) { const l = el('button', 'pri', 'Iniciar sesión (⚙ Ajustes)'); l.onclick = () => showAjustes(); const r = el('button', null, 'Reintentar'); r.onclick = () => { ntLogin = false; leeNotasBB(); }; bar.append(l, r); }
     else { const r = el('button', null, '↻ Actualizar'); r.disabled = ntLeyendo; r.onclick = leeNotasBB; bar.append(r); }
     doc.append(bar);
   }
@@ -827,12 +840,13 @@ function drawNotas() {
     const sec = el('div', 'nt-sec'); sec.style.setProperty('--c', COLOR[k] || 'var(--acc)');
     const h = el('div', 'nt-h'), mt = media(cs); h.append(el('i'), el('b', null, NOMBRES[k] || k.toUpperCase()), el('span', 'nt-n', `${cs.length} calificadas de ${todos.length}`));
     if (mt != null) h.append(el('span', 'nt-avg ' + ntCls(mt / 10), 'Media ' + ntFmt(mt))); sec.append(h);
+    if (typeof notasExtras === 'function' && todos.length) notasExtras(sec, k, todos, h);
     if (!todos.length) sec.append(el('p', 'nt-vacio', 'Blackboard no muestra elementos calificables en esta asignatura (todavía no hay nada publicado o evaluable).'));
     for (const [tit, esEx] of [['Exámenes y tests', true], ['Trabajos y prácticas', false]]) {
       let g = todos.filter(i => ntEsExamen(i) === esEx); if (ntSolo) g = g.filter(i => i.nota != null && i.max); if (!g.length) continue;
       const m2 = media(g.filter(i => i.nota != null && i.max)), gh = el('div', 'nt-g'); gh.append(el('span', null, tit), el('span', 'nt-n', `${g.length}`)); if (m2 != null) gh.append(el('span', 'nt-n', '· media ' + ntFmt(m2))); sec.append(gh);
       for (const i of g.sort((a, b) => (a.fecha || '9999') < (b.fecha || '9999') ? -1 : 1)) {
-        const r = el('div', 'nt-row' + (i.nota == null ? ' sin' : '')), t = el('div', 'nt-t'); t.append(el('b', null, i.titulo));
+        const r = el('div', 'nt-row' + (i.nota == null ? ' sin' : '')), t = el('div', 'nt-t'); t.append(el('b', null, i.titulo)); if (i.nuevo) t.firstChild.append(el('span', 'nt-nuevo', ' 🆕 nueva'));
         const sub = [i.fecha || 'sin fecha', ntEstado(i)]; if (i.peso) sub.push(i.peso); t.append(el('span', 'nt-s', sub.join(' · '))); r.append(t);
         const nn = el('div', 'nt-nota'); if (i.nota != null && i.max) { const p = i.nota / i.max, bar = el('span', 'nt-bar'); nn.classList.add(ntCls(p)); bar.append(Object.assign(el('i'), { style: `width:${Math.min(100, p * 100)}%` })); nn.append(el('b', null, i.notaTexto), bar); } else if (i.completa) nn.append(el('b', 'nt-comp', '✓ Completo')); else nn.append(el('span', 'nt-nd', '—'));
         r.append(nn); sec.append(r);
@@ -845,9 +859,11 @@ function drawNotas() {
 
 // ---------- Preguntar a mis apuntes: busca la respuesta ENTRE los apuntes (RESP, respuestas.js). Sin IA, sin internet y sin instalar nada ----------
 // Opcional: si hay un Ollama local en marcha (solo escritorio) aparece «Redactar con IA local»; si no, ni se menciona.
-const IA_MODELO = 'brain-ia-modelo';
-let rsQ = '', rsSigla = '', rsRes = null, rsIA = null, iaEst = null, iaId = '';
-const iaModelo = () => { try { return localStorage.getItem(IA_MODELO) || ''; } catch { return ''; } };
+const IA_MODELO = 'brain-ia-modelo', IA_PROV = 'brain-ia-prov';
+let rsQ = '', rsSigla = '', rsRes = null, rsIA = null, rsPrev = [], iaEst = null, iaId = '', iaCfgMsg = '', iaCfgAbierto = false;   // iaEst = { ollama:{ok,modelos,defecto}, gemini:{clave,cifrada,modelos,defecto} }
+const lsGet = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } }, lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+const iaOllama = () => !!(iaEst && iaEst.ollama && iaEst.ollama.ok), iaGemini = () => !!(iaEst && iaEst.gemini && iaEst.gemini.clave);
+const iaProveedores = () => [...(iaGemini() ? [['gemini', 'Gemini (nube de Google)']] : []), ...(iaOllama() ? [['ollama', 'Ollama (local)']] : [])];
 const iaMd = (t) => DOMPurify.sanitize(marked.parse(t, { gfm: true }), { FORBID_TAGS: ['a', 'img', 'style', 'form', 'input', 'button'], FORBID_ATTR: ['style', 'href', 'src'] });   // lo que escribe un modelo no es de fiar: sin enlaces ni imágenes
 function iaTrozo(m) { if (!m || m.id !== iaId || !rsIA) return; rsIA.txt += m.txt; if (view === 'preguntar') pintaIA(); }
 function showPreguntar(push = true) {
@@ -864,13 +880,13 @@ function drawPreguntar() {
   const f = el('div', 'rs-form'), inp = el('input'), sel = el('select'), bt = el('button', 'pri', 'Buscar');
   inp.type = 'text'; inp.id = 'rs-q'; inp.placeholder = 'Ej.: ¿qué es la inyección SQL? · adquisición de evidencias · Fail2Ban'; inp.value = rsQ; inp.autocomplete = 'off';
   sel.append(Object.assign(el('option', null, 'Todas las asignaturas'), { value: '' }), ...Object.keys(NOMBRES).map(k => Object.assign(el('option', null, NOMBRES[k]), { value: k }))); sel.value = rsSigla; sel.onchange = () => { rsSigla = sel.value; if (inp.value.trim()) busca(); };
-  const busca = () => { rsQ = inp.value.trim(); rsRes = rsQ ? RESP.responde(notes, rsSigla, rsQ) : null; rsIA = null; pintaRes(); pintaIA(); };
+  const busca = () => { rsQ = inp.value.trim(); rsRes = rsQ ? RESP.responde(notes, rsSigla, rsQ) : null; rsIA = null; rsPrev = []; pintaRes(); pintaIA(); };
   bt.onclick = busca; inp.onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); busca(); } };
   f.append(inp, sel, bt); doc.append(f);
-  const out = el('div', 'rs-out'); out.id = 'rs-out'; const ia = el('div', 'rs-ia'); ia.id = 'rs-ia'; doc.append(out, ia);
+  const out = el('div', 'rs-out'); out.id = 'rs-out'; const ia = el('div', 'rs-ia'); ia.id = 'rs-ia'; doc.append(ia, out);   // la IA arriba; los resultados del buscador debajo
   pintaRes(); pintaIA(); if (!rsRes) inp.focus();
 }
-function rsEnlace(x, txt) { const a = el('a', 'ia-s', txt); a.title = x.path; a.onclick = () => go(x.path); return a; }
+function rsEnlace(x, txt, destino) { const a = el('a', 'ia-s', txt); a.title = x.path + (destino && destino.cab ? ' › ' + destino.cab : ''); a.onclick = () => go(x.path, destino); return a; }   // destino {cab, frase}: abre el apunte en ese apartado y resalta la frase
 function pintaRes() {
   const out = $('#rs-out'); if (!out) return; out.replaceChildren();
   if (!rsRes) { out.append(el('p', 'dsub', notes.length ? `Busco entre ${notes.filter(n => !n.externo).length} apuntes. Con las palabras clave de tu duda suele bastar.` : 'Aún no hay apuntes cargados.')); return; }
@@ -880,36 +896,140 @@ function pintaRes() {
     out.append(el('div', 'dsec', 'Respuesta directa'));
     for (const d of defs) {
       const c = el('div', 'rs-card def'), t = el('div', 'rs-t'); t.append(el('b', null, d.term)); if (d.tag) t.append(el('span', 'rs-tag ' + d.tag, d.tag)); if (d.borrador) t.append(el('span', 'rs-tag borr', 'borrador sin material de clase'));
-      const p = el('div', 'rs-x'); p.append(rsMarca(d.def, rsQ)); const o = el('div', 'rs-o'); o.append(rsEnlace(d, `${d.sigla} · ${d.titulo}`));
+      const p = el('div', 'rs-x'); p.append(rsMarca(d.def, rsQ)); const o = el('div', 'rs-o'); o.append(rsEnlace(d, `${d.sigla} · ${d.titulo}`, { frase: d.term + ':' }));
       c.append(t, p, o); out.append(c);
     }
   }
   if (frags.length) {
     out.append(el('div', 'dsec', defs.length ? 'Más en tus apuntes' : 'Lo que dicen tus apuntes'));
     for (const fr of frags) {
-      const c = el('div', 'rs-card'), t = el('div', 'rs-t'); t.append(rsEnlace(fr, `${fr.sigla} · ${fr.titulo}${fr.cab ? ' › ' + fr.cab : ''}`)); if (fr.borrador) t.append(el('span', 'rs-tag borr', 'borrador sin material de clase'));
+      const c = el('div', 'rs-card'), t = el('div', 'rs-t'); t.append(rsEnlace(fr, `${fr.sigla} · ${fr.titulo}${fr.cab ? ' › ' + fr.cab : ''}`, { cab: fr.cab, frase: (String(fr.extracto || '').split('\n').map(l => l.replace(/^[•…\s]+/, '').trim()).find(l => l.length > 12) || '') })); if (fr.borrador) t.append(el('span', 'rs-tag borr', 'borrador sin material de clase'));
       const p = el('div', 'rs-x pre'); p.append(rsMarca(fr.extracto, rsQ)); c.append(t, p); out.append(c);
     }
   }
 }
 function pintaIA() {
   const w = $('#rs-ia'); if (!w) return; w.replaceChildren();
-  if (!rsRes || !iaEst || !iaEst.ok || !window.brain.iaPreguntar || !rsRes.frags.length) return;   // sin Ollama o sin resultados: nada que ofrecer
-  const bar = el('div', 'rs-iabar'), ms = iaEst.modelos.length ? iaEst.modelos : [iaEst.defecto], sel = el('select');
-  ms.forEach(n => sel.append(Object.assign(el('option', null, n), { value: n }))); sel.value = ms.includes(iaModelo()) ? iaModelo() : (ms.includes(iaEst.defecto) ? iaEst.defecto : ms[0]); sel.id = 'ia-modelo'; sel.onchange = () => { try { localStorage.setItem(IA_MODELO, sel.value); } catch {} };
-  const b = el('button', null, rsIA && rsIA.busy ? '⏹ Detener' : '✨ Redactar la respuesta con IA local'); b.onclick = () => (rsIA && rsIA.busy ? window.brain.iaCancelar(iaId) : iaRedacta());
-  bar.append(b, sel, el('span', 'ia-mut', 'Ollama en tu equipo · sin internet')); w.append(bar);
+  const provs = iaProveedores();
+  if (!rsRes || !window.brain.iaPreguntar || !rsRes.frags.length || !iaEst || !iaEst.gemini) return;   // sin resultados (o en el móvil): nada que ofrecer
+  if (!provs.length) {   // sin IA configurada: una línea discreta para activarla
+    const inv = el('div', 'rs-inv'); inv.append(el('span', null, '✨ ¿Quieres la respuesta redactada por una IA? '));
+    const a = el('a', 'ia-s', 'Configura Gemini (gratis) en Ajustes'); a.onclick = () => showAjustes(); inv.append(a); w.append(inv); return;
+  }
+  const prov = provs.some(p => p[0] === lsGet(IA_PROV)) ? lsGet(IA_PROV) : provs[0][0];
+  const bar = el('div', 'rs-iabar'), selP = el('select'), selM = el('select');
+  provs.forEach(([v, t]) => selP.append(Object.assign(el('option', null, t), { value: v }))); selP.value = prov; selP.id = 'ia-prov';
+  const modelos = prov === 'gemini' ? iaEst.gemini.modelos : (iaEst.ollama.modelos.length ? iaEst.ollama.modelos : [iaEst.ollama.defecto]), kM = IA_MODELO + '-' + prov, defM = prov === 'gemini' ? iaEst.gemini.defecto : iaEst.ollama.defecto;
+  modelos.forEach(n => selM.append(Object.assign(el('option', null, n), { value: n }))); selM.value = modelos.includes(lsGet(kM)) ? lsGet(kM) : (modelos.includes(defM) ? defM : modelos[0]); selM.id = 'ia-modelo';
+  selM.onchange = () => lsSet(kM, selM.value); selP.onchange = () => { lsSet(IA_PROV, selP.value); pintaIA(); };
+  const b = el('button', null, rsIA && rsIA.busy ? '⏹ Detener' : '✨ Redactar la respuesta con IA'); b.onclick = () => (rsIA && rsIA.busy ? window.brain.iaCancelar(iaId) : iaRedacta());
+  bar.append(b, selP, selM, el('span', 'ia-mut', prov === 'gemini' ? 'Envía fragmentos de tus apuntes a Google' : 'En tu equipo · sin internet')); w.append(bar);
+  const burbuja = (x, ultima) => {
+    const bu = el('div', 'ia-b a' + (x.err ? ' err' : '')), c = el('div', 'ia-t' + (x.busy || x.err ? '' : ' md'));
+    if (x.q && !ultima) bu.append(el('div', 'ia-q', '❓ ' + x.q));
+    if (x.err || x.busy) c.textContent = x.txt || (x.busy ? 'Pensando con tus apuntes…' : ''); else c.innerHTML = iaMd(x.txt); bu.append(c);
+    if (!x.busy && !x.err) bu.append(el('div', 'ia-f', `Redactado por ${x.prov === 'gemini' ? 'Gemini (Google)' : 'un modelo local'} a partir de los fragmentos de apuntes: contrasta lo importante con el apunte.`));
+    if (!x.busy && !x.err && x.txt && typeof botonGuardarApunte === 'function') bu.append(botonGuardarApunte({ titulo: (x.q || rsQ).slice(0, 80), cuerpo: `## Pregunta\n${x.q || rsQ}\n\n## Respuesta\n${x.txt}`, fuentes: (x.fuentes || []).map(f => f.path), sigla: rsSigla || ((x.fuentes && x.fuentes[0] && x.fuentes[0].sigla) || '').toLowerCase(), origen: x.prov === 'gemini' ? 'Gemini' : 'Ollama' }));
+    return bu;
+  };
+  for (const p of rsPrev) w.append(burbuja(p, false));
   if (rsIA) {
-    const bu = el('div', 'ia-b a' + (rsIA.err ? ' err' : '')), c = el('div', 'ia-t' + (rsIA.busy || rsIA.err ? '' : ' md'));
-    if (rsIA.err || rsIA.busy) c.textContent = rsIA.txt || (rsIA.busy ? 'Pensando con tus apuntes…' : ''); else c.innerHTML = iaMd(rsIA.txt); bu.append(c);
-    if (!rsIA.busy && !rsIA.err) { bu.append(el('div', 'ia-f', 'Redactado por un modelo pequeño a partir de los fragmentos de arriba: contrasta lo importante con el apunte.')); }
-    w.append(bu);
+    w.append(burbuja(rsIA, !rsIA.q || !rsPrev.length));
+    if (!rsIA.busy && !rsIA.err) {   // pregunta de seguimiento: repregunta con el contexto de lo anterior
+      const sg = el('div', 'ia-seg'), inp = el('input'), go1 = el('button', null, 'Preguntar'); inp.type = 'text'; inp.placeholder = 'Pregunta de seguimiento (ej.: explícamelo más simple, ¿y el siguiente paso?)'; inp.id = 'ia-seg'; inp.maxLength = 300;
+      const envia = () => { const q = inp.value.trim(); if (q) iaRedacta(q, true); }; go1.onclick = envia; inp.onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); envia(); } };
+      sg.append(inp, go1); w.append(sg);
+    }
   }
 }
-async function iaRedacta() {
-  if (rsIA && rsIA.busy) return; const modelo = ($('#ia-modelo') || {}).value || iaModelo(); iaId = 'q' + Date.now(); const mio = rsIA = { txt: '', busy: true }; pintaIA();
-  let r; try { r = await window.brain.iaPreguntar({ id: iaId, pregunta: rsQ, sigla: rsSigla, modelo, historial: [] }); } catch (e) { r = { ok: false, msg: String(e.message || e) }; }
-  mio.busy = false; if (!r || !r.ok) { mio.err = true; mio.txt = (r && r.msg) || 'No se pudo responder'; } else if (r.cancelado) mio.txt += (mio.txt ? '\n\n' : '') + '_(detenido)_';
+// ---------- Ajustes (botón ⚙ junto a la casita): enlaces del campus e IA opcional ----------
+function showAjustes(push = true) {
+  view = 'ajustes'; current = null;
+  if (push && hist[hp] !== '@ajustes') { hist = hist.slice(0, hp + 1); hist.push('@ajustes'); hp = hist.length - 1; }
+  enlaces = null; $('#crumb').textContent = 'Ajustes'; btns(); markOn(); drawAjustes(); loadBB();
+  if (window.brain.iaEstado) window.brain.iaEstado().then(r => { iaEst = r; if (view === 'ajustes') pintaCfg(); }).catch(() => {});
+  if (window.brain.enlacesLista) window.brain.enlacesLista().then(r => { if (r && r.ok) { enlaces = r; if (view === 'ajustes') pintaEnlaces(); } }).catch(() => {});
+}
+let enlaces = null, enlMsg = '';   // enlaces = { campus, lista:[{nombre,url}] }
+function drawAjustes() {
+  doc.replaceChildren(); $('#crumb').textContent = 'Ajustes';
+  const head = el('div', 'dh'); head.append(el('h1', null, 'Ajustes')); doc.append(head);
+  const s0 = el('div', 'aj-sec'); s0.id = 'aj-ses'; const a = el('div', 'aj-sec'); a.id = 'aj-enl'; const c0 = el('div', 'aj-sec'); c0.id = 'aj-cal'; const pv = el('div', 'aj-sec'); pv.id = 'aj-priv'; const av = el('div', 'aj-sec'); av.id = 'aj-avisos'; const ap = el('div', 'aj-sec'); ap.id = 'aj-apar'; const cp = el('div', 'aj-sec'); cp.id = 'aj-copia'; const dg = el('div', 'aj-sec'); dg.id = 'aj-diag'; const up = el('div', 'aj-sec'); up.id = 'aj-act'; const b = el('div', 'aj-sec'); b.id = 'rs-cfg'; doc.append(s0, a, c0, av, ap, pv, cp, up, dg, b);
+  pintaSesion(); pintaEnlaces(); if (typeof pintaCalendario === 'function') pintaCalendario(); if (typeof pintaAvisosAjustes === 'function') pintaAvisosAjustes(); if (typeof pintaPrivacidad === 'function') pintaPrivacidad(); if (typeof pintaApariencia === 'function') pintaApariencia(); if (typeof pintaCopia === 'function') pintaCopia(); if (typeof pintaDiagnostico === 'function') pintaDiagnostico(); if (typeof pintaActualizar === 'function') pintaActualizar(); pintaCfg();
+}
+// Sesión del campus: se inicia aquí una vez y vale para Avisos, Mensajes, Notas e Ingestar novedades (misma sesión del perfil)
+function pintaSesion() {
+  const w = $('#aj-ses'); if (!w) return; w.replaceChildren(); w.append(el('h2', null, '🔐 Sesión del campus (' + campusNombre() + ')'));
+  if (!window.brain.bbLogin || (window.brain.platform || '').toLowerCase().includes('android')) { w.append(el('p', 'dsub', 'El inicio de sesión del campus solo está en la app de escritorio.')); return; }
+  const st = bb && bb.status, cls = !bb ? 'busy' : st === 'ok' || st === 'vacio' ? 'ok' : st === 'login' || st === 'nunca' || st === 'sin-campus' ? 'warn' : 'err';
+  const txt = !bb ? 'Comprobando…' : st === 'ok' || st === 'vacio' ? 'Sesión iniciada' : st === 'login' ? 'Sin sesión iniciada' : st === 'nunca' ? 'Sin comprobar todavía' : st === 'sin-campus' ? 'Falta la URL del campus en tu perfil' : (bb.msg || 'Sin estado');
+  const f = el('div', 'aj-ses'); f.append(el('i', 'led ' + cls), el('b', null, txt), bb && bb.lastCheck ? el('span', 'nt-n', 'comprobada ' + new Date(bb.lastCheck).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })) : document.createTextNode('')); w.append(f);
+  w.append(el('p', 'dsub', 'Inicia sesión aquí una sola vez: vale para Avisos, Mensajes, Notas e «Ingestar novedades». No hace falta volver a hacerlo en cada apartado.'));
+  const row = el('div', 'aj-add');
+  if (st === 'sin-campus' && typeof editarPerfil === 'function') { const b = el('button', 'pri', 'Añadir la URL del campus'); b.onclick = () => editarPerfil(); row.append(b); }
+  else {
+    const ok = st === 'ok' || st === 'vacio', b = el('button', ok ? '' : 'pri', ok ? 'Abrir ' + campusNombre() : 'Iniciar sesión'); b.onclick = () => window.brain.bbLogin();
+    const c = el('button', null, 'Comprobar sesión'); c.onclick = async () => { c.disabled = true; c.textContent = 'Comprobando…'; try { await window.brain.bbCheck(); } catch {} await loadBB(); };
+    row.append(b, c);
+  }
+  w.append(row);
+}
+function pintaEnlaces() {
+  const w = $('#aj-enl'); if (!w) return; w.replaceChildren(); w.append(el('h2', null, '🎓 Enlaces del campus virtual'));
+  if (!window.brain.enlacesGuardar || !enlaces) { w.append(el('p', 'dsub', enlaces === null && window.brain.enlacesLista ? 'Cargando…' : 'Los enlaces solo están en la app de escritorio.')); return; }
+  w.append(el('p', 'dsub', 'Guarda aquí los enlaces de Blackboard o del campus que más usas (una asignatura, las notas, un aula virtual…). Se abren en tu navegador. Se guardan solo en este equipo.'));
+  const fila = (nombre, url, quitar) => {
+    const r = el('div', 'aj-fila'), t = el('div', 'aj-t'); t.append(el('b', null, nombre), el('span', null, url)); r.append(t);
+    const ab = el('button', null, 'Abrir'); ab.onclick = () => window.brain.external(url); r.append(ab);
+    if (quitar) { const q = el('button', 'aj-q', '✕'); q.title = 'Quitar el enlace'; q.onclick = async () => { const r2 = await window.brain.enlacesGuardar(enlaces.lista.filter(x => x !== quitar)); if (r2 && r2.ok) { enlaces.lista = r2.lista; enlMsg = ''; } else enlMsg = (r2 && r2.msg) || 'No se pudo quitar'; pintaEnlaces(); }; r.append(q); }
+    return r;
+  };
+  if (enlaces.campus) w.append(fila('Campus virtual', enlaces.campus, null));
+  for (const x of enlaces.lista) w.append(fila(x.nombre, x.url, x));
+  if (!enlaces.campus && !enlaces.lista.length) w.append(el('p', 'dsub', 'Aún no has guardado ningún enlace.'));
+  const f = el('div', 'aj-add'), n = el('input'), u = el('input'), bt = el('button', 'pri', 'Añadir'), av = el('p', 'msg-warn', enlMsg);
+  n.type = 'text'; n.placeholder = 'Nombre (ej.: BRS · Blackboard)'; n.maxLength = 80; u.type = 'text'; u.placeholder = 'https://…'; u.spellcheck = false;
+  const anade = async () => {
+    const url = u.value.trim(); if (!url) return; bt.disabled = true;
+    const r = await window.brain.enlacesGuardar([...enlaces.lista, { nombre: n.value.trim(), url }]);
+    if (r && r.ok) { enlaces.lista = r.lista; enlMsg = ''; } else enlMsg = (r && r.msg) || 'No se pudo guardar el enlace';
+    pintaEnlaces();
+  };
+  bt.onclick = anade; u.onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); anade(); } };
+  f.append(n, u, bt); w.append(f, av);
+}
+// IA opcional: Gemini en la nube (clave del propio usuario) y estado de Ollama. Solo escritorio.
+function pintaCfg() {
+  const w = $('#rs-cfg'); if (!w) return; w.replaceChildren(); w.append(el('h2', null, '✨ IA opcional (redactar respuestas)'));
+  if (!window.brain.iaGuardarClave) { w.append(el('p', 'dsub', 'La IA opcional solo está en la app de escritorio.')); return; }
+  if (!iaEst || !iaEst.gemini) { w.append(el('p', 'dsub', 'Comprobando…')); return; }
+  const g = el('div', 'rs-g'); g.append(el('b', null, 'Gemini (Google), gratis con tu propia clave'));
+  if (iaGemini()) {
+    g.append(el('p', 'dsub', iaEst.gemini.cifrada ? 'Clave guardada y cifrada en este equipo (llavero del sistema).' : 'Clave en memoria: este sistema no tiene llavero, así que habrá que volver a ponerla al cerrar la app.'));
+    const q = el('button', null, 'Quitar la clave'); q.onclick = async () => { await window.brain.iaQuitarClave(); iaCfgMsg = ''; rsIA = null; iaEst = await window.brain.iaEstado(); pintaCfg(); }; g.append(q);
+  } else {
+    g.append(el('p', 'dsub', 'Crea una clave gratis en Google AI Studio y pégala aquí. Se comprueba con Google y se guarda solo en este equipo.'));
+    const link = el('a', 'ia-s', 'Abrir Google AI Studio ↗'); link.onclick = () => window.brain.external('https://aistudio.google.com/apikey'); g.append(link);
+    const inp = el('input'); inp.type = 'password'; inp.placeholder = 'Clave de Gemini'; inp.autocomplete = 'off'; inp.spellcheck = false; inp.id = 'ia-clave';
+    const chk = el('label', 'msg-chk'), cb = el('input'); cb.type = 'checkbox'; chk.append(cb, document.createTextNode(' Entiendo que, al redactar una respuesta, los fragmentos de mis apuntes que usa se envían a Google y que en el plan gratuito pueden usarlos para mejorar sus productos.'));
+    let aviso; const ok = el('button', 'pri', 'Guardar clave'); ok.onclick = async () => {
+      if (!cb.checked) { aviso.textContent = 'Marca la casilla para continuar.'; return; }
+      if (!inp.value.trim()) return; ok.disabled = true; ok.textContent = 'Comprobando…';
+      const r = await window.brain.iaGuardarClave(inp.value.trim()); inp.value = '';
+      if (r && r.ok) { iaCfgMsg = ''; iaEst = await window.brain.iaEstado(); lsSet(IA_PROV, 'gemini'); } else iaCfgMsg = (r && r.msg) || 'No se pudo guardar la clave';
+      pintaCfg();
+    };
+    aviso = el('p', 'msg-warn', iaCfgMsg); g.append(inp, chk, ok, aviso);
+  }
+  w.append(g, el('p', 'dsub', 'Ollama (local, sin internet): ' + (iaOllama() ? 'en marcha.' : 'no detectado. Si lo instalas y lo abres, aparecerá como opción.')), el('p', 'dsub', 'Con la clave guardada, en 🔎 Preguntar aparece «✨ Redactar la respuesta con IA».'));
+}
+async function iaRedacta(q, seguimiento) {
+  if (rsIA && rsIA.busy) return; const prov = ($('#ia-prov') || {}).value || iaProveedores()[0][0], modelo = ($('#ia-modelo') || {}).value || '';
+  if (seguimiento && rsIA && rsIA.txt && !rsIA.err) rsPrev.push({ q: rsIA.q || rsQ, txt: rsIA.txt, prov: rsIA.prov });
+  const pregunta = seguimiento ? q : rsQ, hist = rsPrev.flatMap(p => [{ rol: 'user', txt: p.q }, { rol: 'assistant', txt: p.txt }]);
+  iaId = 'q' + Date.now(); const mio = rsIA = { txt: '', busy: true, prov, q: seguimiento ? q : '' }; pintaIA();
+  let r; try { r = await window.brain.iaPreguntar({ id: iaId, pregunta, sigla: rsSigla, modelo, proveedor: prov, historial: hist }); } catch (e) { r = { ok: false, msg: String(e.message || e) }; }
+  mio.busy = false; if (r && r.ok) mio.fuentes = r.fuentes || []; if (!r || !r.ok) { mio.err = true; mio.txt = (r && r.msg) || 'No se pudo responder'; } else if (r.cancelado) mio.txt += (mio.txt ? '\n\n' : '') + '_(detenido)_';
   if (view === 'preguntar' && rsIA === mio) pintaIA();
 }
 // 'load' = ya se han ejecutado todos los scripts (study.js, profiles.js…); si hay perfiles, primero se pide quién eres

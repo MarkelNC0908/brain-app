@@ -1,0 +1,13 @@
+const fs = require('fs'), os = require('os'), path = require('path'); const R = require('../src/rapida.js');
+let ok = 0, ko = 0; const t = (n, c) => { c ? ok++ : (ko++, console.log('FALLA', n)); };
+const v = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-rap-')), asig = { sigla: 'pps', dir: path.join(v, '02-Asignaturas', 'pps') }, ahora = new Date(2026, 10, 18, 19, 5);
+const r = R.guardaCaptura({ vault: v, esBrain: true, asig, texto: 'Revisar la diferencia entre CVE y CWE', ahora }); t('guarda en _entrada de la asignatura', r.ok && r.ruta === '02-Asignaturas/pps/_entrada/captura-2026-11-18-1905.md');
+const txt = fs.readFileSync(r.abs, 'utf8'); t('con cabecera, fecha y texto', /^# Captura rápida · PPS · 2026-11-18 19:05\n\nRevisar la diferencia entre CVE y CWE\n$/.test(txt));
+const r2 = R.guardaCaptura({ vault: v, esBrain: true, asig, texto: 'otra', ahora }); t('misma hora: no sobrescribe (-2)', r2.ok && /-2\.md$/.test(r2.ruta) && fs.readFileSync(r.abs, 'utf8') === txt);
+t('texto vacío o corto', !R.guardaCaptura({ vault: v, esBrain: true, asig, texto: ' a ' }).ok);
+t('ruta fuera del vault', !R.guardaCaptura({ vault: v, esBrain: true, asig: { sigla: 'x', dir: path.join(os.tmpdir(), 'fuera') }, texto: 'hola' }).ok);
+const carp = { sigla: 'mates', dir: path.join(v, 'Mates') }; fs.mkdirSync(carp.dir); const r3 = R.guardaCaptura({ vault: v, esBrain: false, asig: carp, texto: 'hola mundo', ahora }); t('carpeta libre: en la propia carpeta', r3.ok && r3.ruta === 'Mates/captura-2026-11-18-1905.md');
+const inbox = path.join(v, 'dudas-inbox.json'); R.anadeDuda(inbox, { texto: 'duda 1' }); R.anadeDuda(inbox, { texto: 'duda 2', sigla: 'he' });
+const s = R.sacaDudas(inbox); t('bandeja de dudas: devuelve y vacía', s.length === 2 && s[1].sigla === 'he' && !fs.existsSync(inbox) && R.sacaDudas(inbox).length === 0);
+fs.writeFileSync(inbox, 'roto'); t('bandeja corrupta no rompe', R.sacaDudas(inbox).length === 0);
+fs.rmSync(v, { recursive: true, force: true }); console.log('ok', ok, 'ko', ko);

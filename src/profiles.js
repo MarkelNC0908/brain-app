@@ -31,7 +31,7 @@ const buscar = (id) => db.profiles.find(p => p.id === id);
 // Rutas de datos del perfil. El «default» usa los nombres antiguos para no perder su sesión ni su estado.
 function datos(p) {
   const u = app.getPath('userData'), legacy = p.id === 'default', suf = legacy ? '' : '-' + p.id;
-  return { partition: legacy ? 'persist:blackboard' : 'persist:bb-' + p.id, bbState: path.join(u, `blackboard${suf}.json`), bbIngesta: path.join(u, `bb-ingesta${suf}.json`), avisos: path.join(u, `avisos${suf}.json`), mensajes: path.join(u, `mensajes${suf}.json`), notas: path.join(u, `notas${suf}.json`) };
+  return { partition: legacy ? 'persist:blackboard' : 'persist:bb-' + p.id, bbState: path.join(u, `blackboard${suf}.json`), bbIngesta: path.join(u, `bb-ingesta${suf}.json`), avisos: path.join(u, `avisos${suf}.json`), mensajes: path.join(u, `mensajes${suf}.json`), notas: path.join(u, `notas${suf}.json`), ia: path.join(u, `ia${suf}.json`), enlaces: path.join(u, `enlaces${suf}.json`), act: path.join(u, `actualizar${suf}.json`), ajustes: path.join(u, `ajustes${suf}.json`) };
 }
 function limpiaCampus(u, conservarRuta) {
   const s = String(u || '').trim(); if (!s) return '';

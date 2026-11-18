@@ -176,12 +176,22 @@ function limpiaFilas(filas) {
   }
   return out;
 }
+// Qué notas son nuevas o han cambiado respecto a la lectura anterior (solo de cursos que ya estaban en ella: la primera lectura es el punto de partida y no avisa)
+function cambiosNotas(prev, nuevo) {
+  const antes = new Map(), cursos = new Set(); for (const c of prev || []) { cursos.add(c.sigla); for (const f of c.filas || []) antes.set(c.sigla + '|' + f.nombre, f); }
+  const out = [];
+  for (const c of nuevo || []) { if (!cursos.has(c.sigla)) continue; for (const f of c.filas || []) {
+    if (f.nota == null) continue; const a = antes.get(c.sigla + '|' + f.nombre), base = { sigla: c.sigla, nombre: f.nombre, nota: f.nota, max: f.max, notaTexto: f.notaTexto };
+    if (!a || a.nota == null) out.push({ ...base, tipo: 'nueva' }); else if (a.nota !== f.nota || a.max !== f.max) out.push({ ...base, tipo: 'cambiada', antes: a.notaTexto });
+  } }
+  return out;
+}
 let notasCache = null;
 function notasEstado() {
   if (!CTX) return { status: 'no-aplica' };
   if (!CTX.campus) return { status: 'sin-campus' };
   if (!notasCache) { try { notasCache = JSON.parse(fs.readFileSync(CTX.notasFile, 'utf8')); } catch { notasCache = { cursos: [], leido: null }; } }
-  return { status: notasCache.leido ? 'ok' : 'nunca', leido: notasCache.leido, cursos: (notasCache.cursos || []).map(c => ({ ...c, filas: limpiaFilas(c.filas) })) };
+  return { status: notasCache.leido ? 'ok' : 'nunca', leido: notasCache.leido, ultimosCambios: notasCache.ultimosCambios || null, cursos: (notasCache.cursos || []).map(c => ({ ...c, filas: limpiaFilas(c.filas) })) };
 }
 let leyendoNotas = null;
 async function notasLeer(vault) {
@@ -198,11 +208,12 @@ async function notasLeer(vault) {
         catch (e) { if (e instanceof NeedLogin) throw e; avisos.push(e.message); }
       }
       if (!cursosOut.length) return { ok: false, msg: avisos[0] || 'Blackboard no devolvió ningún curso que coincida con tus asignaturas' };
-      notasCache = { leido: new Date().toISOString(), cursos: cursosOut };
+      const cambios = notasCache && notasCache.leido ? cambiosNotas(notasCache.cursos, cursosOut) : [];
+      notasCache = { leido: new Date().toISOString(), cursos: cursosOut, ultimosCambios: cambios.length ? { fecha: new Date().toISOString(), lista: cambios } : (notasCache && notasCache.ultimosCambios) || null };
       try { fs.writeFileSync(CTX.notasFile, JSON.stringify(notasCache)); } catch {}
-      return { ok: true, avisos, ...notasEstado() };
+      return { ok: true, avisos, cambios, ...notasEstado() };
     } catch (e) { return e instanceof NeedLogin ? { ok: false, login: true } : { ok: false, msg: String(e.message || e) }; }
   })().finally(() => { leyendoNotas = null; });
   return leyendoNotas;
 }
-module.exports = { init, notasEstado, notasLeer, _filaNota: filaNota, _limpiaFilas: limpiaFilas, escanear, aplicar, cancelar, setProgreso, _parseNotas: parseNotas, _casar: casar, _isoFecha: isoFecha, _cambios: cambios };
+module.exports = { init, notasEstado, notasLeer, _filaNota: filaNota, _cambiosNotas: cambiosNotas, _limpiaFilas: limpiaFilas, escanear, aplicar, cancelar, setProgreso, _parseNotas: parseNotas, _casar: casar, _isoFecha: isoFecha, _cambios: cambios };

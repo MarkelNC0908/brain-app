@@ -1,0 +1,13 @@
+const fs = require('fs'), os = require('os'), path = require('path'); const { guardarApunte, _slug } = require('../src/guardar-apunte.js');
+let ok = 0, ko = 0; const t = (n, c) => { c ? ok++ : (ko++, console.log('FALLA', n)); };
+const v = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-ga-')), asig = { sigla: 'pps', dir: path.join(v, '02-Asignaturas', 'pps') };
+const d = { titulo: '¿Qué es el hardening? "ñandú"', cuerpo: '## Pregunta\nqué es\n\n## Respuesta\nReducir superficie de ataque [1].', fuentes: ['02-Asignaturas/pps/apuntes/ud2-01-hardening.md', '02-Asignaturas/pps/apuntes/ud2-01-hardening.md'], origen: 'Gemini' };
+const r = guardarApunte({ vault: v, esBrain: true, asig, d, hoy: '2026-11-18' }); t('crea', r.ok && r.ruta === '02-Asignaturas/pps/apuntes/ia-que-es-el-hardening-nandu.md');
+const txt = fs.readFileSync(r.abs, 'utf8'); t('cabecera del Brain', /^---\ntype: tema\nsigla: "PPS"\ntitle: "PPS · apunte · ¿Qué es el hardening\? ñandú"\nstatus: borrador/.test(txt) && /updated: 2026-11-18/.test(txt));
+t('marca de borrador y supuesto', /NO sale de las diapositivas del profesor/.test(txt) && /\[supuesto\]/.test(txt)); t('fuentes como wikilinks sin duplicar', (txt.match(/\[\[ud2-01-hardening\]\]/g) || []).length === 1); t('sin comillas en el título', !/title: ".*".*"/.test(txt.split('\n')[3]));
+const r2 = guardarApunte({ vault: v, esBrain: true, asig, d, hoy: '2026-11-18' }); t('no sobrescribe: -2', r2.ok && /-2\.md$/.test(r2.ruta) && fs.readFileSync(r.abs, 'utf8') === txt);
+t('título/texto vacío', !guardarApunte({ vault: v, esBrain: true, asig, d: { titulo: 'x', cuerpo: 'corto' }, hoy: 'x' }).ok);
+t('ruta fuera del vault rechazada', !guardarApunte({ vault: v, esBrain: true, asig: { sigla: 'x', dir: path.join(os.tmpdir(), 'otra') }, d, hoy: 'x' }).ok);
+const carpeta = { sigla: 'mates', dir: path.join(v, 'Mates') }; fs.mkdirSync(carpeta.dir); const r3 = guardarApunte({ vault: v, esBrain: false, asig: carpeta, d, hoy: '2026-11-18' }); t('carpeta libre', r3.ok && r3.ruta === 'Mates/ia-que-es-el-hardening-nandu.md' && /^# /.test(fs.readFileSync(r3.abs, 'utf8')));
+t('slug', _slug('Árbol — ¡Año nuevo!') === 'arbol-ano-nuevo');
+fs.rmSync(v, { recursive: true, force: true }); console.log('ok', ok, 'ko', ko);

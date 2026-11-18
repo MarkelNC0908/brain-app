@@ -35,6 +35,17 @@ function buildCards() {
   cardsCache = { n: notes.length, list }; return list;
 }
 const box = (c) => (P.cards[c.id] || {}).b || 0;
+// Repaso espaciado: tras cada respuesta la tarjeta vuelve a tocar en 1, 3, 7 o 14 días según su caja (si la fallas, mañana)
+const DIAS_REPASO = [0, 1, 3, 7, 14];
+const programa = (o) => { o.next = Date.now() + DIAS_REPASO[Math.min(4, o.b || 0)] * 864e5; };
+const tocaHoy = (c) => { const o = P.cards[c.id]; return !!(o && o.next && o.next <= Date.now()); };
+function repasoPendientes() { try { return buildCards().filter(tocaHoy).length; } catch { return 0; } }
+function repasoHoy() {
+  if (view !== 'study') showStudy();
+  const todas = buildCards(), due = todas.filter(tocaHoy); if (!due.length) { menu(); doc.append(el('div', 'dmsg', 'No tienes tarjetas pendientes de repaso hoy.')); return; }
+  const pool = due.length >= 4 ? due : [...due, ...elige(todas.filter(c => !due.includes(c)), 4 - due.length)];
+  empezar('flash', pool);
+}
 const dominada = (c) => box(c) >= 3;
 function elige(pool, n) {   // prioriza lo no dominado: 70 % de las preguntas salen de tarjetas con caja < 3
   const dif = shuffle(pool.filter(c => !dominada(c))), ok = shuffle(pool.filter(dominada)), nDif = Math.min(dif.length, Math.ceil(n * 0.7));
@@ -74,6 +85,7 @@ function menu() {
     r.append(el('b', null, s.toUpperCase()), b, el('span', null, `${d}/${cs.length} dominadas`)); g.append(r);
   }
   doc.append(el('div', 'dsec', 'Dominio por asignatura'), g);
+  if (typeof estadisticasEstudio === 'function') estadisticasEstudio(doc);
   // selección
   doc.append(el('div', 'dsec', 'Elige qué estudiar'));
   const f = el('div', 'sel'), selS = el('select'), selA = el('select');
@@ -85,6 +97,9 @@ function menu() {
   const b = (txt, fn, cls) => { const x = el('button', cls || '', txt); x.onclick = fn; acc.append(x); return x; };
   b('🎮 Test rápido (10)', () => empezar('test', pool()), 'pri');
   b('🃏 Flashcards', () => empezar('flash', pool()));
+  { const nd = pool().filter(tocaHoy).length; b(`📆 Repaso de hoy (${nd})`, () => repasoHoy(), nd ? 'pri' : ''); }
+  if (typeof showPlan === 'function') b('📅 Plan de examen y simulacro', () => showPlan());
+  if (typeof exportaAnki === 'function' && typeof esEscritorio === 'function' && esEscritorio()) { const ba = b('📤 Exportar a Anki', async () => { const r = await exportaAnki(pool()); ba.textContent = r && r.ok ? '✓ Guardado' : r && r.cancelado ? '📤 Exportar a Anki' : '⚠ ' + ((r && r.msg) || 'No se pudo'); }); ba.title = 'Guarda las tarjetas de la selección en un archivo para importarlas en Anki'; }
   b('🔁 Repasar mis fallos', () => empezar('test', pool().filter(c => box(c) === 1)));
   const par = todas.filter(c => c.sigla === 'INC' && /clase[234]-/.test(c.path));
   if (par.length && typeof PROFILE !== 'undefined' && PROFILE && PROFILE.id === 'default') b(`📝 Parcial INC (23 nov): Clases 2-4 · ${par.length}`, () => empezar('test', par));
@@ -114,7 +129,7 @@ function pintaPregunta() {
 }
 function responde(bt, o, lst, q) {
   if (S.done) return; S.done = true; const ok = o === q.ok, ms = Date.now() - S.t0, id = q.c.id, c = P.cards[id] || { b: 0, s: 0 };
-  c.s++; c.b = ok ? Math.min(4, (c.b || 0) + 1) : 1; P.cards[id] = c;
+  c.s++; c.b = ok ? Math.min(4, (c.b || 0) + 1) : 1; programa(c); P.cards[id] = c;
   if (ok) { S.ok++; S.streak++; S.best = Math.max(S.best, S.streak); P.best = Math.max(P.best, S.streak); const g = 10 + (S.streak >= 3 ? 5 : 0) + (ms < 8000 ? 5 : 0); S.xp += g; P.xp += g; }
   else { S.streak = 0; S.fails.push(q); }
   [...lst.children].forEach(x => { x.disabled = true; if (x.textContent.slice(3) === q.ok) x.classList.add('good'); });
@@ -129,7 +144,7 @@ function pintaFlash() {
   doc.append(el('p', 'dsub', S.flip ? '¿Te la sabías?' : 'Pulsa la tarjeta (o espacio) para ver la definición'));
   if (S.flip) {
     const r = el('div', 'acts2'); const si = el('button', 'pri', '✓ La sabía'), no = el('button', null, '↺ Repasar');
-    const sig = (ok) => { const o = P.cards[c.id] || { b: 0, s: 0 }; o.s++; o.b = ok ? Math.min(4, (o.b || 0) + 1) : 1; P.cards[c.id] = o; if (ok) { S.ok++; S.xp += 5; P.xp += 5; } else S.fails.push({ c }); saveP(); S.flip = false; S.i++; S.i < S.qs.length ? pintaFlash() : fin(); };
+    const sig = (ok) => { const o = P.cards[c.id] || { b: 0, s: 0 }; o.s++; o.b = ok ? Math.min(4, (o.b || 0) + 1) : 1; programa(o); P.cards[c.id] = o; if (ok) { S.ok++; S.xp += 5; P.xp += 5; } else S.fails.push({ c }); saveP(); S.flip = false; S.i++; S.i < S.qs.length ? pintaFlash() : fin(); };
     si.onclick = () => sig(true); no.onclick = () => sig(false); r.append(si, no); doc.append(r);
   }
 }
