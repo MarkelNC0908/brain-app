@@ -15,7 +15,7 @@ const VENTANA_DIAS = 45;   // se muestran ficheros creados en los últimos 45 d�
 class NeedLogin extends Error {}
 let hechos = new Set();
 const saveState = () => { try { if (CTX) fs.writeFileSync(CTX.ingestaFile, JSON.stringify({ hechos: [...hechos].slice(-1500) })); } catch {} };
-function init(ctx) { CTX = ctx; hechos = new Set(); ultimo = null; try { hechos = new Set(JSON.parse(fs.readFileSync(ctx.ingestaFile, 'utf8')).hechos || []); } catch {} }
+function init(ctx) { CTX = ctx; hechos = new Set(); ultimo = null; notasCache = null; try { hechos = new Set(JSON.parse(fs.readFileSync(ctx.ingestaFile, 'utf8')).hechos || []); } catch {} }
 let ultimo = null;   // resultado del último escaneo: el renderer solo puede aplicar lo que está aquí (por id)
 
 async function api(p) {
@@ -77,7 +77,7 @@ async function descargar(vault, f, idx, n) {
 // ---- notas y estados (página «Libro de calificaciones» de cada curso) ----
 function parseNotas(texto) {
   const toks = texto.split(/[\n\t]+/).map(s => s.trim()).filter(Boolean), i0 = toks.findIndex(t => /^Resultados$/i.test(t));
-  const fecha = /^\d{1,2}\/\d{1,2}\/\d{2,4}$/, nota = /^(\d+(?:[.,]\d+)?\/\d+(?:[.,]\d+)?|Sin calificar)$/i, intento = /^Se entreg/i;
+  const fecha = /^\d{1,2}\/\d{1,2}\/\d{2,4}$/, nota = /^(\d+(?:[.,]\d+)?\/\d+(?:[.,]\d+)?|Sin calificar)$/i, intento = /^(Se entreg|No se entreg|Intento\s+\d+|Borrador guardado)/i;   // anotaciones de la fila anterior («No se entregó ningún intento», «Intento 2 iniciado (0 atrasado)»…), no son un elemento nuevo
   const estado = /^(Calificado|Enviado|Sin enviar|Entregado|Pendiente|Completado|Vencido|Borrador|En curso|Necesita calificaci[oó]n|Exento|Continuo)$/i;
   const rows = []; let cur = null;
   for (const tk of toks.slice(i0 + 1)) {
@@ -96,12 +96,20 @@ async function leerNotas(c) {
   const win = new BrowserWindow({ show: false, webPreferences: { partition: CTX.partition, contextIsolation: true, sandbox: true, nodeIntegration: false } });
   try {
     await win.loadURL(`${CTX.campus}/ultra/courses/${c.courseId}/grades`).catch(() => {});
-    const t0 = Date.now();
-    while (Date.now() - t0 < 30000) {
+    const t0 = Date.now(); let ult = '', iguales = 0;
+    while (Date.now() - t0 < 40000) {
       if (!win.webContents.getURL().startsWith(CTX.campus + '/ultra/') && Date.now() - t0 > 6000) throw new NeedLogin('login');
-      try { const t = await win.webContents.executeJavaScript(`document.body.innerText`); if (/Nombre del elemento/.test(t) && /Resultados/.test(t)) return t; } catch {}
+      try {
+        const t = await win.webContents.executeJavaScript(`document.body.innerText`);
+        if (/Nombre del elemento/.test(t) && /Resultados/.test(t)) {
+          // la cabecera de la tabla sale antes que las filas: se espera al paginador («Página 1 de 1»), que aparece cuando las filas ya están; si no sale nunca (curso vacío), se acepta el texto cuando lleva 6 s sin cambiar
+          if (/P[aá]gina\s*\d+\s*de\s*\d+/.test(t)) return t;
+          if (t === ult) { if (++iguales >= 6) return t; } else { ult = t; iguales = 0; }
+        }
+      } catch {}
       await new Promise(r => setTimeout(r, 1000));
     }
+    if (ult) return ult;
     throw new Error(`La página de notas de ${c.sigla.toUpperCase()} no cargó`);
   } finally { if (!win.isDestroyed()) win.destroy(); }
 }
@@ -142,4 +150,59 @@ async function aplicar(vault, hoy, idsFicheros, idsCambios, descartar) {
 }
 const cancelar = () => { if (abortar) abortar.abort(); };
 const setProgreso = (cb) => { onProg = cb; };
-module.exports = { init, escanear, aplicar, cancelar, setProgreso, _parseNotas: parseNotas, _casar: casar, _isoFecha: isoFecha, _cambios: cambios };
+
+// ---- Notas del curso tal como las muestra Blackboard (pantalla «Notas» de la app) ----
+// Lee el libro de calificaciones de cada curso con la sesión del perfil y lo guarda en la carpeta de datos de la app (fuera del Brain y de Git).
+// Solo lectura: no cambia nada en Blackboard ni en el Brain.
+const num = (s) => parseFloat(String(s).replace(',', '.'));
+function filaNota(r) {
+  const m = (r.nota || '').match(/^(\d+(?:[.,]\d+)?)\s*\/\s*(\d+(?:[.,]\d+)?)$/);
+  return { nombre: r.nombre, estado: r.estado || '', fecha: isoFecha(r.fecha), nota: m ? num(m[1]) : null, max: m ? num(m[2]) : null, notaTexto: m ? `${m[1]}/${m[2]}` : '', sinCalificar: /^Sin calificar$/i.test(r.nota || '') };
+}
+// El texto de la página mete ruido entre las filas: paginador («Página 1 de 1»), «La calificación está completa.» (marca de la fila anterior) y la asistencia (no es un trabajo ni un examen)
+const RUIDO_NOTAS = /^(la calificaci[oó]n est[aá] (in)?completa\.?|p[aá]gina(\s+\d+)?(\s+de\s+\d+)?|de\s+\d+|\d+)$/i;
+const ANOT_NOTAS = /^(No se entreg[oó] ning[uú]n intento|Se entreg|Intento\s+\d+|Borrador guardado)/i;
+function limpiaFilas(filas) {
+  const out = [];
+  for (const r of filas || []) {
+    const n = String(r.nombre || '').trim(), p = out[out.length - 1];
+    if (RUIDO_NOTAS.test(n)) { if (/est[aá] completa/i.test(n) && p) p.completa = true; continue; }
+    if (ANOT_NOTAS.test(n)) {   // una anotación que quedó como fila (datos guardados con el lector anterior): sus datos son de la fila anterior
+      if (p) { if (!p.estado && r.estado) p.estado = r.estado; if (!p.fecha && r.fecha) p.fecha = r.fecha; if (p.nota == null && r.nota != null) { p.nota = r.nota; p.max = r.max; p.notaTexto = r.notaTexto; } if (!p.sinCalificar && r.sinCalificar) p.sinCalificar = true; }
+      continue;
+    }
+    if (/^asistencia$/i.test(n) || /^continuo$/i.test(r.estado || '')) continue;
+    out.push(r);
+  }
+  return out;
+}
+let notasCache = null;
+function notasEstado() {
+  if (!CTX) return { status: 'no-aplica' };
+  if (!CTX.campus) return { status: 'sin-campus' };
+  if (!notasCache) { try { notasCache = JSON.parse(fs.readFileSync(CTX.notasFile, 'utf8')); } catch { notasCache = { cursos: [], leido: null }; } }
+  return { status: notasCache.leido ? 'ok' : 'nunca', leido: notasCache.leido, cursos: (notasCache.cursos || []).map(c => ({ ...c, filas: limpiaFilas(c.filas) })) };
+}
+let leyendoNotas = null;
+async function notasLeer(vault) {
+  if (!CTX || !CTX.campus) return { ok: false, msg: 'Añade la URL de tu campus en el perfil' };
+  if (leyendoNotas) return leyendoNotas;
+  leyendoNotas = (async () => {
+    CTX.vault = vault; const cursosOut = [], avisos = []; notasEstado();   // carga lo guardado para no perderlo si una lectura sale incompleta
+    try {
+      for (const c of await cursos()) {
+        try {
+          const txt = await leerNotas(c), completo = /P[aá]gina\s*\d+\s*de\s*\d+/.test(txt), filas = limpiaFilas(parseNotas(txt).map(filaNota)), prev = ((notasCache && notasCache.cursos) || []).find(x => x.sigla === c.sigla);
+          if (!filas.length && !completo && prev && (prev.filas || []).length) { cursosOut.push({ ...prev, antiguo: true }); continue; }   // lectura incompleta: no se pierde lo que ya se había leído
+          cursosOut.push({ sigla: c.sigla, nombre: c.nombre, filas, ...(filas.length ? {} : { muestra: txt.slice(Math.max(0, txt.search(/Nombre del elemento/)), Math.max(0, txt.search(/Nombre del elemento/)) + 700) }) }); }   // sin filas: se guarda un trozo del texto de la página para poder ver por qué
+        catch (e) { if (e instanceof NeedLogin) throw e; avisos.push(e.message); }
+      }
+      if (!cursosOut.length) return { ok: false, msg: avisos[0] || 'Blackboard no devolvió ningún curso que coincida con tus asignaturas' };
+      notasCache = { leido: new Date().toISOString(), cursos: cursosOut };
+      try { fs.writeFileSync(CTX.notasFile, JSON.stringify(notasCache)); } catch {}
+      return { ok: true, avisos, ...notasEstado() };
+    } catch (e) { return e instanceof NeedLogin ? { ok: false, login: true } : { ok: false, msg: String(e.message || e) }; }
+  })().finally(() => { leyendoNotas = null; });
+  return leyendoNotas;
+}
+module.exports = { init, notasEstado, notasLeer, _filaNota: filaNota, _limpiaFilas: limpiaFilas, escanear, aplicar, cancelar, setProgreso, _parseNotas: parseNotas, _casar: casar, _isoFecha: isoFecha, _cambios: cambios };

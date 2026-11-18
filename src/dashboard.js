@@ -96,7 +96,8 @@ function build(vault, hoy, io) {
       const st = (fm.status || '').toLowerCase(), g = grade(fm.grade);
       const col = /calific|corregid/.test(st) ? 'done' : /entregad/.test(st) ? 'sent' : /curso/.test(st) ? 'doing' : /pendiente|todo|por-hacer/.test(st) ? 'todo' : (g ? 'done' : 'todo');
       const gg = col === 'done' ? g : null;   // una nota guardada no cuenta si la tarjeta se movió fuera de Corregido
-      add({ sigla: S, titulo, fecha: fm.due || null, tipo: fm.kind || '', col, nota: gg ? gg.nota : null, max: gg ? gg.max : null, notaTexto: gg ? gg.texto : '', fuente: `${s}/entregas/${f}` });
+      const pm = t.match(/^weight:[^\n#]*#\s*(.+)$/m);   // el peso suele venir como comentario del campo («Forma parte del 50 % de…»)
+      add({ sigla: S, titulo, fecha: fm.due || null, tipo: fm.kind || '', col, nota: gg ? gg.nota : null, max: gg ? gg.max : null, notaTexto: gg ? gg.texto : '', peso: fm.weight || (pm ? clean(pm[1]) : ''), fuente: `${s}/entregas/${f}` });
     }
     // 2) Líneas de la ficha: formato del Brain de referencia primero y, si no encaja, lectura flexible
     const ficha = io.read(s + '/' + s + '.md'); const ffm = front(ficha); if (ffm.updated) updates.push(ffm.updated);

@@ -4,6 +4,7 @@ const fs = require('fs');
 const dashboard = require('./dashboard');
 const L = require('./layout');
 const campusMod = require('./campus');
+const asistenteMod = require('./asistente');   // chat con un modelo local de Ollama sobre los apuntes
 const mensajesMod = require('./mensajes');   // mensajes privados de Blackboard (solo lectura)   // elige el conector según el campus del perfil
 let cur = campusMod.para('blackboard');   // { avisos, ingesta } del perfil activo
 const profiles = require('./profiles');
@@ -129,6 +130,18 @@ const abrirMensajes = () => { if (!win || win.isDestroyed()) return; if (win.isM
 const avisaMensajes = () => { if (win && !win.isDestroyed()) win.webContents.send('msg:changed'); };
 // segundo plano: solo los contadores de no leídos (1 carga de página); la lista completa se lee al abrir «Mensajes»
 const revisarMensajes = (silencioso) => mensajesMod.check({ soloResumen: true, silencioso, onClick: abrirMensajes }).then(r => { avisaMensajes(); return r; });
+// Asistente (Ollama local): la pregunta se responde con trozos de los apuntes del perfil activo; el texto sale por 'ia:trozo' y nada va a internet
+ipcMain.handle('ia:estado', (e) => (fromWin(e) ? asistenteMod.estado() : { ok: false }));
+ipcMain.handle('ia:preguntar', (e, d) => {
+  if (!fromWin(e) || !vault || !d || typeof d !== 'object') return { ok: false, msg: 'No permitido' };
+  const hist = (Array.isArray(d.historial) ? d.historial : []).slice(-6).map(m => ({ rol: m && m.rol === 'assistant' ? 'assistant' : 'user', txt: String((m && m.txt) || '').slice(0, 3000) }));
+  let notas; try { notas = buildIndex(); } catch (err) { return { ok: false, msg: 'No se pudieron leer los apuntes' }; }
+  return asistenteMod.preguntar({ id: String(d.id || '').slice(0, 40), pregunta: String(d.pregunta || ''), sigla: String(d.sigla || '').slice(0, 20), modelo: String(d.modelo || ''), historial: hist }, notas, (m) => { if (win && !win.isDestroyed()) win.webContents.send('ia:trozo', m); });
+});
+ipcMain.handle('ia:cancelar', (e, id) => { if (fromWin(e)) asistenteMod.cancelar(String(id || '')); });
+// Notas del curso leídas de Blackboard (solo lectura); sin Blackboard la pantalla usa las del Brain
+ipcMain.handle('notas:state', () => (cur.ingesta.notasEstado ? cur.ingesta.notasEstado() : { status: 'no-aplica' }));
+ipcMain.handle('notas:leer', (e) => (fromWin(e) && vault && cur.ingesta.notasLeer ? cur.ingesta.notasLeer(vault) : { ok: false, msg: 'Las notas de Blackboard solo están disponibles con un campus Blackboard' }));
 ipcMain.handle('msg:state', () => mensajesMod.state());
 ipcMain.handle('msg:check', (e) => (fromWin(e) ? mensajesMod.check({ silencioso: true, onCambio: avisaMensajes }).then(r => { avisaMensajes(); return r; }) : null));   // lectura completa, la pide la pantalla
 ipcMain.handle('msg:hilo', (e, courseId, convId, total, forzar) => (fromWin(e) ? mensajesMod.hilo(String(courseId), String(convId), Number(total) || 1, !!forzar).then(r => { avisaMensajes(); return r; }) : { ok: false, msg: 'No permitido' }));
@@ -155,7 +168,7 @@ function activar(p) {
   const d = profiles.datos(p), asig = () => cursosMod.asignaturas(p.vault);
   cur = campusMod.para(profiles.tipoDe(p));
   cur.avisos.init({ campus: p.campusUrl, icalUrl: p.icalUrl || '', partition: d.partition, stateFile: d.bbState, asignaturas: asig });
-  cur.ingesta.init({ campus: p.campusUrl, icalUrl: p.icalUrl || '', partition: d.partition, ingestaFile: d.bbIngesta });
+  cur.ingesta.init({ campus: p.campusUrl, icalUrl: p.icalUrl || '', partition: d.partition, ingestaFile: d.bbIngesta, notasFile: d.notas });
   mensajesMod.init({ activo: profiles.tipoDe(p) === 'blackboard', campus: p.campusUrl, partition: d.partition, stateFile: d.mensajes, asignaturas: asig });
   cur.ingesta.setProgreso(prog => { if (win && !win.isDestroyed()) win.webContents.send('bbi:progress', prog); });   // progreso de descargas grandes (vídeos)
   setVault(p.vault);

@@ -36,7 +36,7 @@ async function load() {
   for (const n of notes) n.hay = norm(n.title + '\n' + n.body);
   q.value ? search(q.value) : buildTree();
   loadDash(); loadBB(); loadMsgs(); if (!statusIniciado) { statusIniciado = true; refreshStatus(); }   // primer chequeo del LED aunque no haya llegado ningún evento de sincronización
-  if (view === 'dash' || view === 'study' || view === 'avisos' || view === 'horario' || view === 'mensajes') {} else if (current && byPath.has(current)) show(current); else if (!current) home();
+  if (view === 'dash' || view === 'study' || view === 'avisos' || view === 'horario' || view === 'mensajes' || view === 'notas' || view === 'preguntar') {} else if (current && byPath.has(current)) show(current); else if (!current) home();
 }
 
 function buildTree() {
@@ -67,7 +67,7 @@ function go(p) {
   const nn = byPath.get(p); if (nn && nn.externo) { window.brain.openFile(p); return; }   // PDF, Word… se abren con su aplicación
   hist = hist.slice(0, hp + 1); hist.push(p); hp = hist.length - 1; show(p); }
 function goSubject(s) { hist = hist.slice(0, hp + 1); hist.push('@' + s); hp = hist.length - 1; subject(s); }
-function nav(d) { const i = hp + d; if (i < 0 || i >= hist.length) return; hp = i; const h = hist[hp]; h === '@study' ? showStudy(false) : h === '@dash' ? showDash(false) : h === '@avisos' ? showAvisos(false) : h === '@mensajes' ? showMensajes(false) : h === '@horario' ? showHorario(false) : h === '@home' ? home() : h[0] === '@' ? subject(h.slice(1)) : show(h); }
+function nav(d) { const i = hp + d; if (i < 0 || i >= hist.length) return; hp = i; const h = hist[hp]; h === '@study' ? showStudy(false) : h === '@dash' ? showDash(false) : h === '@avisos' ? showAvisos(false) : h === '@mensajes' ? showMensajes(false) : h === '@horario' ? showHorario(false) : h === '@preguntar' ? showPreguntar(false) : h === '@notas' ? showNotas(false) : h === '@home' ? home() : h[0] === '@' ? subject(h.slice(1)) : show(h); }
 const btns = () => { $('#back').disabled = hp <= 0; $('#fwd').disabled = hp >= hist.length - 1; };
 
 function resolve(target) {
@@ -228,7 +228,7 @@ const STALE_DAYS = 7;   // si el Brain no se actualiza en más de 7 días, el LE
 const COLS = [['todo', 'Por hacer'], ['doing', 'En curso'], ['sent', 'Entregado'], ['done', 'Corregido']];
 let dashFilter = 'ALL', dashMsg = null;
 const fdate = (d) => d ? new Date(d + 'T00:00').toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : 'sin fecha';
-async function loadDash() { try { dash = await window.brain.dashData(); } catch (e) { dash = { error: String(e) }; } updateBell(); if (view === 'dash') drawDash(); else if (view === 'avisos') drawAvisos(); else if (view === 'horario') drawHorario(); }
+async function loadDash() { try { dash = await window.brain.dashData(); } catch (e) { dash = { error: String(e) }; } updateBell(); if (view === 'dash') drawDash(); else if (view === 'avisos') drawAvisos(); else if (view === 'horario') drawHorario(); else if (view === 'notas') drawNotas(); }
 async function loadBB() { try { bb = await window.brain.bbState(); } catch { bb = null; } updateBell(); if (view === 'dash') drawDash(); else if (view === 'avisos') drawAvisos(); }
 const diasHasta = (f) => Math.round((new Date(f + 'T00:00') - new Date(dash.hoy + 'T00:00')) / 864e5);
 const cercanas = () => dash && dash.items ? dash.items.filter(i => (i.col === 'todo' || i.col === 'doing') && i.fecha && diasHasta(i.fecha) >= 0 && diasHasta(i.fecha) <= 7) : [];
@@ -381,6 +381,9 @@ $('#g-nota').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#g-g
 $('#dbtn').onclick = () => { dashMsg = null; showDash(); };
 $('#hobtn').onclick = () => showHorario();
 $('#msgbtn').onclick = () => showMensajes();
+$('#rbtn').onclick = () => showPreguntar();
+$('#ntbtn').onclick = () => showNotas();
+if (window.brain.onIaTrozo) window.brain.onIaTrozo(iaTrozo);
 window.brain.onMensajesChanged(loadMsgs); window.brain.onMensajes(() => showMensajes());
 // ---- Horario: semana por días y franjas, leído de 01-Curso/calendario*.md (celdas «AAAA-MM-DD SIGLA») y de las franjas «Bloque 1: 17:30 – 20:00» de 01-Curso/curso.md. Solo lectura ----
 // <parse-horario>
@@ -759,5 +762,155 @@ $('#tgrip').addEventListener('mousedown', (e) => {
   const up = () => { removeEventListener('mousemove', mv); removeEventListener('mouseup', up); refit(); };
   addEventListener('mousemove', mv); addEventListener('mouseup', up);
 });
+
+// ---------- Notas del curso: por asignatura y, dentro de cada una, exámenes/tests y trabajos/prácticas ----------
+// Fuente principal: el libro de calificaciones de Blackboard (lo lee el proceso principal con la sesión del perfil, solo lectura).
+// Sin Blackboard (otro campus, carpeta libre, móvil) se usan las notas anotadas en el Brain a través del dashboard. La media es simple, sin ponderar.
+let ntSigla = '', ntSolo = false, ntBB = null, ntLeyendo = false, ntMsg = '', ntLogin = false;
+const ntEsExamen = (i) => i.tipo === 'examen' || i.tipo === 'test' || /\b(examen|parcial|test|prueba|quiz)\b/i.test(i.titulo);
+const ntEstado = (i) => i.estadoTxt || (i.col === 'done' ? (i.nota != null ? 'Calificado' : 'Corregido (sin nota anotada)') : i.col === 'sent' ? 'Entregado · pendiente de nota' : i.col === 'doing' ? 'En curso' : (i.vencida ? 'Vencido sin entregar' : 'Por hacer'));
+const ntFmt = (x) => String(+x.toFixed(2)).replace('.', ',');
+const ntCls = (p) => (p < 0.5 ? 'bad' : p < 0.7 ? 'mid' : 'ok');
+const ntHayBB = () => !!(ntBB && ntBB.cursos && ntBB.cursos.length);
+function showNotas(push = true) {
+  view = 'notas'; current = null;
+  if (push && hist[hp] !== '@notas') { hist = hist.slice(0, hp + 1); hist.push('@notas'); hp = hist.length - 1; }
+  $('#crumb').textContent = 'Notas'; btns(); markOn(); drawNotas(); loadDash();
+  if (!window.brain.notasState) return;
+  window.brain.notasState().then(r => {
+    if (!r || !r.status) return; ntBB = r; if (view === 'notas') drawNotas();
+    if (['ok', 'nunca'].includes(r.status) && !ntLogin && (!r.leido || Date.now() - new Date(r.leido) > 30 * 60000)) leeNotasBB();   // al abrir: lo guardado al instante y, si tiene más de 30 min, se vuelve a leer
+  }).catch(() => {});
+}
+async function leeNotasBB() {
+  if (ntLeyendo || !window.brain.notasLeer) return; ntLeyendo = true; ntMsg = ''; ntLogin = false; if (view === 'notas') drawNotas();
+  try { const r = await window.brain.notasLeer(); if (r && r.ok) ntBB = r; else if (r && r.login) { ntLogin = true; ntMsg = 'Inicia sesión en Blackboard para leer tus notas'; } else ntMsg = (r && r.msg) || 'No se pudieron leer las notas'; } catch (e) { ntMsg = String(e.message || e); }
+  ntLeyendo = false; if (view === 'notas') drawNotas();
+}
+// Filas con la misma forma sea cual sea la fuente
+function ntItems() {
+  if (ntHayBB()) {
+    const out = []; for (const c of ntBB.cursos) for (const f of c.filas) {
+      const ok = f.nota != null && f.max, est = f.estado || (f.sinCalificar ? 'Sin calificar' : '');
+      out.push({ sigla: String(c.sigla).toUpperCase(), titulo: f.nombre, fecha: f.fecha || '', tipo: '', peso: '', nota: ok ? f.nota : null, max: ok ? f.max : null, notaTexto: ok ? f.notaTexto : '', completa: !!f.completa && !ok, estadoTxt: f.completa && !ok ? 'Calificado (completo, sin nota numérica)' : est, col: ok || f.completa ? 'done' : /Enviado|Entregado|Necesita calificaci/i.test(est) ? 'sent' : /En curso|Borrador/i.test(est) ? 'doing' : 'todo' });
+    }
+    return out;
+  }
+  return dash && dash.items ? dash.items.filter(i => i.tipo !== 'calendario' && i.tipo !== 'tarea' && i.titulo && i.titulo.length <= 90) : [];   // Brain: solo entregas y exámenes (fuera avisos del calendario, tareas de apuntes y líneas largas que no son una entrega)
+}
+function drawNotas() {
+  const keep = doc.scrollTop; doc.replaceChildren(); $('#crumb').textContent = 'Notas';
+  const head = el('div', 'dh'); head.append(el('h1', null, 'Notas del curso')); doc.append(head);
+  const bb = ntBB && ['ok', 'nunca'].includes(ntBB.status), hayBB = ntHayBB();
+  if (bb) {   // barra de estado de Blackboard
+    const bar = el('div', 'ia-bar'), cls = ntLeyendo ? 'busy' : ntLogin ? 'warn' : ntMsg ? 'err' : hayBB ? 'ok' : 'warn';
+    const hora = ntBB.leido ? 'leído ' + new Date(ntBB.leido).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'sin leer todavía';
+    bar.append(el('i', 'led ' + cls), el('b', null, 'Blackboard'), el('span', 'ia-mut', ntLeyendo ? 'Leyendo tus notas…' : (ntMsg || hora)));
+    if (ntLogin) { const l = el('button', 'pri', 'Iniciar sesión'); l.onclick = () => { try { window.brain.bbLogin(); } catch {} }; const r = el('button', null, 'Reintentar'); r.onclick = () => { ntLogin = false; leeNotasBB(); }; bar.append(l, r); }
+    else { const r = el('button', null, '↻ Actualizar'); r.disabled = ntLeyendo; r.onclick = leeNotasBB; bar.append(r); }
+    doc.append(bar);
+  }
+  const items = ntItems();
+  if (!items.length) {
+    if (!hayBB && !dash) { doc.append(el('p', 'dsub', 'Calculando…')); return; }
+    doc.append(el('p', 'dsub', bb ? (ntLeyendo ? 'Un momento: se están leyendo las notas de cada asignatura.' : 'Todavía no hay notas leídas de Blackboard. Pulsa «Actualizar» (si te pide sesión, inicia sesión en Blackboard).') : 'Aún no hay entregas ni exámenes en tu Brain. Cuando haya notas de entregas, aparecerán aquí.')); return;
+  }
+  const sig = Object.keys(NOMBRES).filter(k => items.some(i => i.sigla.toLowerCase() === k) || (hayBB && ntBB.cursos.some(c => String(c.sigla).toLowerCase() === k))), cal = items.filter(i => i.nota != null && i.max);
+  doc.append(el('p', 'dsub', `${cal.length} notas de ${items.length} entregas y exámenes. ` + (hayBB ? 'Datos tal como los muestra Blackboard (solo lectura). ' : 'Datos del Brain' + (dash && dash.ultimaActualizacion ? ' actualizado el ' + dash.ultimaActualizacion : '') + ': no se han leído de Blackboard. ') + 'La media es simple (sin ponderar por peso).'));
+  const chips = el('div', 'chips'), chip = (txt, on, fn) => { const b = el('button', 'chip' + (on ? ' on' : ''), txt); b.onclick = fn; chips.append(b); };
+  chip('Todas', !ntSigla, () => { ntSigla = ''; drawNotas(); });
+  for (const k of sig) { const g = items.filter(i => i.sigla.toLowerCase() === k && i.nota != null && i.max), m = g.length ? g.reduce((a, i) => a + i.nota / i.max * 10, 0) / g.length : null; chip(`${k.toUpperCase()}${m != null ? ' · ' + ntFmt(m) : ''}`, ntSigla === k, () => { ntSigla = k; drawNotas(); }); }
+  chip(ntSolo ? '✔ Solo calificadas' : 'Solo calificadas', ntSolo, () => { ntSolo = !ntSolo; drawNotas(); });
+  doc.append(chips);
+  for (const k of sig.filter(k => !ntSigla || k === ntSigla)) {
+    const todos = items.filter(i => i.sigla.toLowerCase() === k), cs = todos.filter(i => i.nota != null && i.max), media = (arr) => (arr.length ? arr.reduce((a, i) => a + i.nota / i.max * 10, 0) / arr.length : null);
+    const sec = el('div', 'nt-sec'); sec.style.setProperty('--c', COLOR[k] || 'var(--acc)');
+    const h = el('div', 'nt-h'), mt = media(cs); h.append(el('i'), el('b', null, NOMBRES[k] || k.toUpperCase()), el('span', 'nt-n', `${cs.length} calificadas de ${todos.length}`));
+    if (mt != null) h.append(el('span', 'nt-avg ' + ntCls(mt / 10), 'Media ' + ntFmt(mt))); sec.append(h);
+    if (!todos.length) sec.append(el('p', 'nt-vacio', 'Blackboard no muestra elementos calificables en esta asignatura (todavía no hay nada publicado o evaluable).'));
+    for (const [tit, esEx] of [['Exámenes y tests', true], ['Trabajos y prácticas', false]]) {
+      let g = todos.filter(i => ntEsExamen(i) === esEx); if (ntSolo) g = g.filter(i => i.nota != null && i.max); if (!g.length) continue;
+      const m2 = media(g.filter(i => i.nota != null && i.max)), gh = el('div', 'nt-g'); gh.append(el('span', null, tit), el('span', 'nt-n', `${g.length}`)); if (m2 != null) gh.append(el('span', 'nt-n', '· media ' + ntFmt(m2))); sec.append(gh);
+      for (const i of g.sort((a, b) => (a.fecha || '9999') < (b.fecha || '9999') ? -1 : 1)) {
+        const r = el('div', 'nt-row' + (i.nota == null ? ' sin' : '')), t = el('div', 'nt-t'); t.append(el('b', null, i.titulo));
+        const sub = [i.fecha || 'sin fecha', ntEstado(i)]; if (i.peso) sub.push(i.peso); t.append(el('span', 'nt-s', sub.join(' · '))); r.append(t);
+        const nn = el('div', 'nt-nota'); if (i.nota != null && i.max) { const p = i.nota / i.max, bar = el('span', 'nt-bar'); nn.classList.add(ntCls(p)); bar.append(Object.assign(el('i'), { style: `width:${Math.min(100, p * 100)}%` })); nn.append(el('b', null, i.notaTexto), bar); } else if (i.completa) nn.append(el('b', 'nt-comp', '✓ Completo')); else nn.append(el('span', 'nt-nd', '—'));
+        r.append(nn); sec.append(r);
+      }
+    }
+    doc.append(sec);
+  }
+  doc.scrollTop = keep;
+}
+
+// ---------- Preguntar a mis apuntes: busca la respuesta ENTRE los apuntes (RESP, respuestas.js). Sin IA, sin internet y sin instalar nada ----------
+// Opcional: si hay un Ollama local en marcha (solo escritorio) aparece «Redactar con IA local»; si no, ni se menciona.
+const IA_MODELO = 'brain-ia-modelo';
+let rsQ = '', rsSigla = '', rsRes = null, rsIA = null, iaEst = null, iaId = '';
+const iaModelo = () => { try { return localStorage.getItem(IA_MODELO) || ''; } catch { return ''; } };
+const iaMd = (t) => DOMPurify.sanitize(marked.parse(t, { gfm: true }), { FORBID_TAGS: ['a', 'img', 'style', 'form', 'input', 'button'], FORBID_ATTR: ['style', 'href', 'src'] });   // lo que escribe un modelo no es de fiar: sin enlaces ni imágenes
+function iaTrozo(m) { if (!m || m.id !== iaId || !rsIA) return; rsIA.txt += m.txt; if (view === 'preguntar') pintaIA(); }
+function showPreguntar(push = true) {
+  view = 'preguntar'; current = null;
+  if (push && hist[hp] !== '@preguntar') { hist = hist.slice(0, hp + 1); hist.push('@preguntar'); hp = hist.length - 1; }
+  $('#crumb').textContent = 'Preguntar'; btns(); markOn(); drawPreguntar();
+  if (window.brain.iaEstado) window.brain.iaEstado().then(r => { iaEst = r; if (view === 'preguntar') pintaIA(); }).catch(() => {});
+}
+function rsMarca(texto, q) { const s = el('span'); for (const p of RESP.resalta(texto, q)) { if (p.m) s.append(el('mark', null, p.t)); else s.append(document.createTextNode(p.t)); } return s; }
+function drawPreguntar() {
+  doc.replaceChildren(); $('#crumb').textContent = 'Preguntar';
+  const head = el('div', 'dh'); head.append(el('h1', null, 'Preguntar a mis apuntes')); doc.append(head);
+  doc.append(el('p', 'dsub', 'Escribe tu duda y te enseño qué dicen tus apuntes. Busca solo entre ellos (sin internet ni IA), así que no se inventa nada.'));
+  const f = el('div', 'rs-form'), inp = el('input'), sel = el('select'), bt = el('button', 'pri', 'Buscar');
+  inp.type = 'text'; inp.id = 'rs-q'; inp.placeholder = 'Ej.: ¿qué es la inyección SQL? · adquisición de evidencias · Fail2Ban'; inp.value = rsQ; inp.autocomplete = 'off';
+  sel.append(Object.assign(el('option', null, 'Todas las asignaturas'), { value: '' }), ...Object.keys(NOMBRES).map(k => Object.assign(el('option', null, NOMBRES[k]), { value: k }))); sel.value = rsSigla; sel.onchange = () => { rsSigla = sel.value; if (inp.value.trim()) busca(); };
+  const busca = () => { rsQ = inp.value.trim(); rsRes = rsQ ? RESP.responde(notes, rsSigla, rsQ) : null; rsIA = null; pintaRes(); pintaIA(); };
+  bt.onclick = busca; inp.onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); busca(); } };
+  f.append(inp, sel, bt); doc.append(f);
+  const out = el('div', 'rs-out'); out.id = 'rs-out'; const ia = el('div', 'rs-ia'); ia.id = 'rs-ia'; doc.append(out, ia);
+  pintaRes(); pintaIA(); if (!rsRes) inp.focus();
+}
+function rsEnlace(x, txt) { const a = el('a', 'ia-s', txt); a.title = x.path; a.onclick = () => go(x.path); return a; }
+function pintaRes() {
+  const out = $('#rs-out'); if (!out) return; out.replaceChildren();
+  if (!rsRes) { out.append(el('p', 'dsub', notes.length ? `Busco entre ${notes.filter(n => !n.externo).length} apuntes. Con las palabras clave de tu duda suele bastar.` : 'Aún no hay apuntes cargados.')); return; }
+  const { defs, frags } = rsRes;
+  if (!defs.length && !frags.length) { const e = el('div', 'rs-vacio'); e.append(el('b', null, 'No está en tus apuntes.'), el('p', null, 'Ningún apunte habla de eso' + (rsSigla ? ' en esta asignatura' : '') + '. Prueba con otras palabras (el término tal como sale en clase) o con «Todas las asignaturas».')); out.append(e); return; }
+  if (defs.length) {
+    out.append(el('div', 'dsec', 'Respuesta directa'));
+    for (const d of defs) {
+      const c = el('div', 'rs-card def'), t = el('div', 'rs-t'); t.append(el('b', null, d.term)); if (d.tag) t.append(el('span', 'rs-tag ' + d.tag, d.tag)); if (d.borrador) t.append(el('span', 'rs-tag borr', 'borrador sin material de clase'));
+      const p = el('div', 'rs-x'); p.append(rsMarca(d.def, rsQ)); const o = el('div', 'rs-o'); o.append(rsEnlace(d, `${d.sigla} · ${d.titulo}`));
+      c.append(t, p, o); out.append(c);
+    }
+  }
+  if (frags.length) {
+    out.append(el('div', 'dsec', defs.length ? 'Más en tus apuntes' : 'Lo que dicen tus apuntes'));
+    for (const fr of frags) {
+      const c = el('div', 'rs-card'), t = el('div', 'rs-t'); t.append(rsEnlace(fr, `${fr.sigla} · ${fr.titulo}${fr.cab ? ' › ' + fr.cab : ''}`)); if (fr.borrador) t.append(el('span', 'rs-tag borr', 'borrador sin material de clase'));
+      const p = el('div', 'rs-x pre'); p.append(rsMarca(fr.extracto, rsQ)); c.append(t, p); out.append(c);
+    }
+  }
+}
+function pintaIA() {
+  const w = $('#rs-ia'); if (!w) return; w.replaceChildren();
+  if (!rsRes || !iaEst || !iaEst.ok || !window.brain.iaPreguntar || !rsRes.frags.length) return;   // sin Ollama o sin resultados: nada que ofrecer
+  const bar = el('div', 'rs-iabar'), ms = iaEst.modelos.length ? iaEst.modelos : [iaEst.defecto], sel = el('select');
+  ms.forEach(n => sel.append(Object.assign(el('option', null, n), { value: n }))); sel.value = ms.includes(iaModelo()) ? iaModelo() : (ms.includes(iaEst.defecto) ? iaEst.defecto : ms[0]); sel.id = 'ia-modelo'; sel.onchange = () => { try { localStorage.setItem(IA_MODELO, sel.value); } catch {} };
+  const b = el('button', null, rsIA && rsIA.busy ? '⏹ Detener' : '✨ Redactar la respuesta con IA local'); b.onclick = () => (rsIA && rsIA.busy ? window.brain.iaCancelar(iaId) : iaRedacta());
+  bar.append(b, sel, el('span', 'ia-mut', 'Ollama en tu equipo · sin internet')); w.append(bar);
+  if (rsIA) {
+    const bu = el('div', 'ia-b a' + (rsIA.err ? ' err' : '')), c = el('div', 'ia-t' + (rsIA.busy || rsIA.err ? '' : ' md'));
+    if (rsIA.err || rsIA.busy) c.textContent = rsIA.txt || (rsIA.busy ? 'Pensando con tus apuntes…' : ''); else c.innerHTML = iaMd(rsIA.txt); bu.append(c);
+    if (!rsIA.busy && !rsIA.err) { bu.append(el('div', 'ia-f', 'Redactado por un modelo pequeño a partir de los fragmentos de arriba: contrasta lo importante con el apunte.')); }
+    w.append(bu);
+  }
+}
+async function iaRedacta() {
+  if (rsIA && rsIA.busy) return; const modelo = ($('#ia-modelo') || {}).value || iaModelo(); iaId = 'q' + Date.now(); const mio = rsIA = { txt: '', busy: true }; pintaIA();
+  let r; try { r = await window.brain.iaPreguntar({ id: iaId, pregunta: rsQ, sigla: rsSigla, modelo, historial: [] }); } catch (e) { r = { ok: false, msg: String(e.message || e) }; }
+  mio.busy = false; if (!r || !r.ok) { mio.err = true; mio.txt = (r && r.msg) || 'No se pudo responder'; } else if (r.cancelado) mio.txt += (mio.txt ? '\n\n' : '') + '_(detenido)_';
+  if (view === 'preguntar' && rsIA === mio) pintaIA();
+}
 // 'load' = ya se han ejecutado todos los scripts (study.js, profiles.js…); si hay perfiles, primero se pide quién eres
 window.addEventListener('load', () => (typeof gate === 'function' ? gate() : Promise.resolve()).then(load));
