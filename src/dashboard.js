@@ -64,10 +64,14 @@ function lineaGenerica(l) {
   if (!(f.pos <= 25 || t.length - f.pos < 28 || /\([^)]*\d[^)]*\)\s*$/.test(t))) return null;
   let titulo = f.resto.split(/\s+[—→]\s+/)[0].split(';')[0].replace(/\(\s*\)/g, '').replace(/^[\s:,\-–—·()\[\]]+|[\s:,\-–—·()\[\]]+$/g, '').replace(/\s{2,}/g, ' ').trim();
   if ((titulo.match(/\(/g) || []).length > (titulo.match(/\)/g) || []).length) titulo += ')';
-  if (titulo.length < 3 || /^(ninguna|ninguno|sin\b|no hay|publicad[oa]s?\b|contenido\b|sesiones\b)/i.test(titulo) || /ninguna publicada/i.test(titulo)) return null; titulo = titulo.slice(0, 120);
+  if (titulo.length < 3 || /^(ninguna|ninguno|sin\b|no hay|publicad[oa]s?\b|contenido\b|sesiones\b)/i.test(titulo) || /ninguna publicada/i.test(titulo) || esInformativa(titulo)) return null; titulo = titulo.slice(0, 120);
   const e = cb ? { col: cb[1] === ' ' ? 'todo' : 'sent', g: null } : estadoDeTexto(f.resto);
   return { titulo, fecha: f.iso, hora: f.hora, col: e.col, g: e.g };
 }
+// Líneas que cuentan algo que pasó y no son entregas: «el usuario descargó material…», «se ingestaron las sesiones…».
+// Se mira cómo EMPIEZA el texto: «parcial de las Clases 2 y 3, según el usuario» sí es una entrega.
+const RE_INFORMATIVA = /^(?:el|la)\s+(?:usuari[oa]|alumn[oa]|estudiante|profesor[a]?)\b|^se\s+(?:ingest|descarg|revis|actualiz|añad|public|sub)|^(?:ingestad|descargad|revisad|actualizad|añadid)[oa]s?\b|^(?:descarg|ingest)[óo]\b/i;
+const esInformativa = (titulo) => RE_INFORMATIVA.test(String(titulo || '').trim());
 // Líneas de viñeta de todas las secciones cuyo encabezado (##/###) encaje con la expresión
 function seccionesRe(txt, re) {
   const out = []; let dentro = false;
@@ -111,6 +115,7 @@ function build(vault, hoy, io) {
         const { col, g } = estadoDeTexto(rest);
         const pts = (head.match(/\((\d+)\s*(?:pts?|puntos)\b/i) || [])[1];
         const titulo = head.replace(/\s*\((\d+)\s*(?:pts?|puntos)[^)]*\)/i, '').trim();
+        if (esInformativa(titulo)) continue;   // «- NC, 2026-11-16: el usuario descargó material…» es un dato, no una entrega
         const plural = /completados|entregados/.test(norm(rest)) && /,| y /.test(titulo);
         for (const n of (plural ? titulo.split(/,\s*|\s+y\s+/).filter(Boolean) : [titulo])) poner(n, m[2], m[3], col, g, pts ? +pts : null);
       } else { const g2 = lineaGenerica(l); if (g2) poner(g2.titulo, g2.fecha, g2.hora, g2.col, g2.g); }
