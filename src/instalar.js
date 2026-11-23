@@ -16,13 +16,13 @@ function carpetaApp(plat, exe) {
 }
 // Formas de extraer el .zip, por orden. En Windows: tar.exe (bsdtar, viene con Windows 10 1803+ y 11) y, si falla, PowerShell.
 // OJO: con «powershell -Command» los argumentos de detrás NO llegan a $args (Expand-Archive recibía la ruta vacía y fallaba siempre, v1.0.14-1.0.17);
-// por eso las rutas van en variables de entorno.
+// por eso las rutas van en variables de entorno. Se usa ZipFile de .NET y no Expand-Archive, que falló en el Windows de GitHub Actions con un zip válido.
 function comandosExtraer(plat, zip, stage, env = process.env) {
   if (plat === 'darwin') return [{ cmd: '/usr/bin/ditto', args: ['-x', '-k', zip, stage] }];
   if (plat === 'win32') {
     const W = path.win32, sys = W.join(env.SystemRoot || env.windir || 'C:\\Windows', 'System32');
     return [{ cmd: W.join(sys, 'tar.exe'), args: ['-xf', zip, '-C', stage] },
-      { cmd: W.join(sys, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:BRAIN_ZIP -DestinationPath $env:BRAIN_DESTINO -Force"], env: { ...env, BRAIN_ZIP: zip, BRAIN_DESTINO: stage } }];
+      { cmd: W.join(sys, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory($env:BRAIN_ZIP, $env:BRAIN_DESTINO)"], env: { ...env, BRAIN_ZIP: zip, BRAIN_DESTINO: stage } }];
   }
   return [{ cmd: 'unzip', args: ['-q', '-o', zip, '-d', stage] }];
 }

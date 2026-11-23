@@ -52,7 +52,7 @@ t('scripts de macOS/Linux con restauración y sin datos incrustados', /mv "\$BAC
   // Windows: «powershell -Command … $args[0]» no recibe los argumentos (Expand-Archive con ruta vacía: «No se pudo extraer el .zip»); ahora tar.exe y, si no, PowerShell con variables de entorno
   { const w = I._comandosExtraer('win32', 'C:\\Users\\Ana Pérez\\Downloads\\Brain-windows-x64.zip', 'C:\\T\\brain-upd-1', { SystemRoot: 'C:\\Windows' });
     t('Windows: primero tar.exe del sistema', w[0].cmd === 'C:\\Windows\\System32\\tar.exe' && w[0].args.join('|') === '-xf|C:\\Users\\Ana Pérez\\Downloads\\Brain-windows-x64.zip|-C|C:\\T\\brain-upd-1');
-    t('Windows: PowerShell con las rutas en variables, sin $args', /powershell\.exe$/.test(w[1].cmd) && !w[1].args.join(' ').includes('$args') && /\$env:BRAIN_ZIP/.test(w[1].args.join(' ')) && w[1].env.BRAIN_ZIP.endsWith('Brain-windows-x64.zip') && w[1].env.BRAIN_DESTINO === 'C:\\T\\brain-upd-1');
+    t('Windows: PowerShell con las rutas en variables, sin $args', /powershell\.exe$/.test(w[1].cmd) && !w[1].args.join(' ').includes('$args') && /\$env:BRAIN_ZIP/.test(w[1].args.join(' ')) && /ZipFile\]::ExtractToDirectory/.test(w[1].args.join(' ')) && w[1].env.BRAIN_ZIP.endsWith('Brain-windows-x64.zip') && w[1].env.BRAIN_DESTINO === 'C:\\T\\brain-upd-1');
     // zip de prueba con jszip (en Windows no hay «zip»); se extrae con el extractor real de cada sistema (el tar de GNU de Linux no abre .zip)
     const JSZip = require('jszip'), zj = new JSZip(); zj.file('Brain-win32-x64/Brain.exe', 'x');
     const zw = path.join(tmp, 'Brain-windows-x64.zip'); fs.writeFileSync(zw, await zj.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
@@ -60,7 +60,7 @@ t('scripts de macOS/Linux con restauración y sin datos incrustados', /mv "\$BAC
     const st1 = path.join(tmp, 'st-w1'), r1 = await I._extraer('win32', zw, st1, [{ cmd: '/no/existe/tar.exe', args: [] }, real(st1)[0]]);
     t('Windows: si el primero falla prueba el siguiente', r1.ok && I._localizaNueva('win32', st1) === path.join(st1, 'Brain-win32-x64'));
     if (process.platform === 'win32') {   // en Windows (GitHub Actions) se prueban de verdad tar.exe y PowerShell, cada uno por separado
-      for (const [k, c] of I._comandosExtraer('win32', zw, '').entries()) { const st = path.join(tmp, 'st-win-' + k), cc = I._comandosExtraer('win32', zw, st)[k], r = await I._extraer('win32', zw, st, [cc]); t(`Windows real: extrae con ${path.win32.basename(c.cmd)}`, r.ok && fs.existsSync(path.join(st, 'Brain-win32-x64', 'Brain.exe'))); }
+      for (const [k, c] of I._comandosExtraer('win32', zw, '').entries()) { const st = path.join(tmp, 'st-win-' + k), cc = I._comandosExtraer('win32', zw, st)[k], r = await I._extraer('win32', zw, st, [cc]); t(`Windows real: extrae con ${path.win32.basename(c.cmd)}${r.ok ? '' : ' → ' + r.msg}`, r.ok && fs.existsSync(path.join(st, 'Brain-win32-x64', 'Brain.exe'))); }
     }
     const r2 = await I._extraer('win32', zw, path.join(tmp, 'st-w2'), [{ cmd: '/no/existe/tar.exe', args: [] }]);
     t('Windows: si todo falla, el mensaje dice el motivo', !r2.ok && /No se pudo extraer el \.zip · tar\.exe: .*ENOENT/.test(r2.msg)); }
