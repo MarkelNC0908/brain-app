@@ -14,10 +14,28 @@ function carpetaApp(plat, exe) {
   if (plat === 'darwin') { const i = String(exe).indexOf('.app/Contents/MacOS/'); return i > 0 ? String(exe).slice(0, i + 4) : ''; }
   return path.dirname(String(exe));
 }
-async function extraer(plat, zip, stage) {
-  fs.mkdirSync(stage, { recursive: true });
-  const r = plat === 'darwin' ? await run('/usr/bin/ditto', ['-x', '-k', zip, stage]) : plat === 'win32' ? await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force', zip, stage]) : await run('unzip', ['-q', '-o', zip, '-d', stage]);
-  return r.ok ? { ok: true } : { ok: false, msg: 'No se pudo extraer el .zip' + (plat === 'linux' ? ' (¿está instalado «unzip»?)' : '') };
+// Formas de extraer el .zip, por orden. En Windows: tar.exe (bsdtar, viene con Windows 10 1803+ y 11) y, si falla, PowerShell.
+// OJO: con «powershell -Command» los argumentos de detrás NO llegan a $args (Expand-Archive recibía la ruta vacía y fallaba siempre, v1.0.14-1.0.17);
+// por eso las rutas van en variables de entorno.
+function comandosExtraer(plat, zip, stage, env = process.env) {
+  if (plat === 'darwin') return [{ cmd: '/usr/bin/ditto', args: ['-x', '-k', zip, stage] }];
+  if (plat === 'win32') {
+    const W = path.win32, sys = W.join(env.SystemRoot || env.windir || 'C:\\Windows', 'System32');
+    return [{ cmd: W.join(sys, 'tar.exe'), args: ['-xf', zip, '-C', stage] },
+      { cmd: W.join(sys, 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:BRAIN_ZIP -DestinationPath $env:BRAIN_DESTINO -Force"], env: { ...env, BRAIN_ZIP: zip, BRAIN_DESTINO: stage } }];
+  }
+  return [{ cmd: 'unzip', args: ['-q', '-o', zip, '-d', stage] }];
+}
+const limpiaErr = (t) => String(t || '').replace(/\x1b\[[0-9;]*m/g, '').replace(/\s+/g, ' ').trim().slice(0, 300);
+async function extraer(plat, zip, stage, cmds) {
+  fs.mkdirSync(stage, { recursive: true }); const fallos = [];
+  for (const c of cmds || comandosExtraer(plat, zip, stage)) {
+    const r = await run(c.cmd, c.args, c.env ? { env: c.env } : undefined);
+    if (r.ok) return { ok: true, con: path.win32.basename(c.cmd) };
+    fallos.push(`${path.win32.basename(c.cmd)}: ${limpiaErr(r.err) || 'error'}`);
+    try { fs.rmSync(stage, { recursive: true, force: true }); fs.mkdirSync(stage, { recursive: true }); } catch {}   // lo que dejó a medias el intento anterior
+  }
+  return { ok: false, msg: 'No se pudo extraer el .zip' + (plat === 'linux' ? ' (¿está instalado «unzip»?)' : '') + ' · ' + fallos.join(' · ') };
 }
 function localizaNueva(plat, stage) {
   const exe = plat === 'darwin' ? 'Brain.app' : plat === 'win32' ? 'Brain.exe' : 'Brain';
@@ -83,7 +101,8 @@ if errorlevel 1 ( if defined LOG echo no se pudo apartar la versión anterior >>
 robocopy "%NEW%" "%DEST%" /E /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 goto restaura
 if not exist "%DEST%\\Brain.exe" goto restaura
-rmdir /s /q "%BACKUP%" & rmdir /s /q "%STAGE%"
+rmdir /s /q "%BACKUP%"
+rem la carpeta temporal (con este mismo script) no se borra aquí: cmd lee el .cmd línea a línea; la app la limpia al arrancar (limpiaRestos)
 if defined LOG echo versión nueva instalada >> "%LOG%"
 goto relanza
 :restaura
@@ -106,14 +125,16 @@ async function preparar({ plat, arch, zip, esperada, exe, empaquetada, temp }) {
   if (!ex.ok) { fs.rmSync(stage, { recursive: true, force: true }); return ex; }
   const nueva = localizaNueva(plat, stage); if (!nueva) { fs.rmSync(stage, { recursive: true, force: true }); return { ok: false, msg: 'El .zip no contiene la aplicación esperada.' }; }
   if (plat === 'darwin' && esperada) { const v = await versionApp(plat, nueva); if (v !== String(esperada).replace(/^v/i, '')) { fs.rmSync(stage, { recursive: true, force: true }); return { ok: false, msg: `La versión del .zip (${v || '?'}) no es la esperada (${esperada}).` }; } }
-  const s = scriptDe(plat), script = path.join(stage, s.nombre); fs.writeFileSync(script, s.texto, { mode: 0o755 });
+  const s = scriptDe(plat), script = path.join(stage, s.nombre); fs.writeFileSync(script, plat === 'win32' ? s.texto.replace(/\r?\n/g, '\r\n') : s.texto, { mode: 0o755 });   // .cmd con CRLF: con LF, cmd puede no encontrar las etiquetas de goto
   return { ok: true, stage, nueva, dest, script };
 }
 // Lanza el script en segundo plano, independiente de la app (que debe cerrarse enseguida)
 function lanzar({ plat, script, nueva, dest, stage, pid, relanzar, log, abrir }) {
   const args = [String(pid), nueva, dest, stage, relanzar ? '1' : '0', abrir || '', log || ''];
-  const p = plat === 'win32' ? spawn('cmd.exe', ['/c', script, ...args], { detached: true, stdio: 'ignore', windowsHide: true }) : spawn('/bin/bash', [script, ...args], { detached: true, stdio: 'ignore' });
+  // cwd: la carpeta temporal. Si heredara el de la app (en Windows suele ser su propia carpeta), no se podría apartar la versión anterior
+  const cwd = path.dirname(script);
+  const p = plat === 'win32' ? spawn('cmd.exe', ['/c', script, ...args], { detached: true, stdio: 'ignore', windowsHide: true, cwd }) : spawn('/bin/bash', [script, ...args], { detached: true, stdio: 'ignore', cwd });
   p.unref(); return p.pid;
 }
 function limpiaRestos(temp) { try { for (const n of fs.readdirSync(temp || os.tmpdir())) { if (!/^brain-upd-[0-9a-f]{10}$/.test(n)) continue; const f = path.join(temp || os.tmpdir(), n); if (Date.now() - fs.statSync(f).mtimeMs > 24 * 3600 * 1000) fs.rmSync(f, { recursive: true, force: true }); } } catch {} }
-module.exports = { carpetaApp, zipDeSistema, preparar, lanzar, limpiaRestos, scriptDe, ZIP_RE, _versionApp: versionApp, _localizaNueva: localizaNueva };
+module.exports = { _comandosExtraer: comandosExtraer, _extraer: extraer, carpetaApp, zipDeSistema, preparar, lanzar, limpiaRestos, scriptDe, ZIP_RE, _versionApp: versionApp, _localizaNueva: localizaNueva };

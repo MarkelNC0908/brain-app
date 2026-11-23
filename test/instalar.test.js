@@ -49,5 +49,16 @@ t('scripts de macOS/Linux con restauración y sin datos incrustados', /mv "\$BAC
     mkApp(path.join(tmp, 'solo-lectura'), '1.0.13'); fs.chmodSync(path.join(tmp, 'solo-lectura'), 0o555); const p3 = await I.preparar({ ...base, zip, exe: path.join(tmp, 'solo-lectura', 'Brain.app', 'Contents', 'MacOS', 'Brain') }); fs.chmodSync(path.join(tmp, 'solo-lectura'), 0o755);
     t('macOS: sin permiso de escritura, lo dice y no extrae nada', !p3.ok && /permiso para escribir/.test(p3.msg));
   }
+  // Windows: «powershell -Command … $args[0]» no recibe los argumentos (Expand-Archive con ruta vacía: «No se pudo extraer el .zip»); ahora tar.exe y, si no, PowerShell con variables de entorno
+  { const w = I._comandosExtraer('win32', 'C:\\Users\\Ana Pérez\\Downloads\\Brain-windows-x64.zip', 'C:\\T\\brain-upd-1', { SystemRoot: 'C:\\Windows' });
+    t('Windows: primero tar.exe del sistema', w[0].cmd === 'C:\\Windows\\System32\\tar.exe' && w[0].args.join('|') === '-xf|C:\\Users\\Ana Pérez\\Downloads\\Brain-windows-x64.zip|-C|C:\\T\\brain-upd-1');
+    t('Windows: PowerShell con las rutas en variables, sin $args', /powershell\.exe$/.test(w[1].cmd) && !w[1].args.join(' ').includes('$args') && /\$env:BRAIN_ZIP/.test(w[1].args.join(' ')) && w[1].env.BRAIN_ZIP.endsWith('Brain-windows-x64.zip') && w[1].env.BRAIN_DESTINO === 'C:\\T\\brain-upd-1');
+    const fz = path.join(tmp, 'w'); fs.mkdirSync(path.join(fz, 'Brain-win32-x64'), { recursive: true }); fs.writeFileSync(path.join(fz, 'Brain-win32-x64', 'Brain.exe'), 'x');
+    const zw = path.join(tmp, 'Brain-windows-x64.zip'); require('child_process').execFileSync('zip', ['-qr', zw, 'Brain-win32-x64'], { cwd: fz });
+    const st1 = path.join(tmp, 'st-w1'), r1 = await I._extraer('win32', zw, st1, [{ cmd: '/no/existe/tar.exe', args: [] }, { cmd: 'tar', args: ['-xf', zw, '-C', st1] }]);
+    t('Windows: si el primero falla prueba el siguiente', r1.ok && I._localizaNueva('win32', st1) === path.join(st1, 'Brain-win32-x64'));
+    const r2 = await I._extraer('win32', zw, path.join(tmp, 'st-w2'), [{ cmd: '/no/existe/tar.exe', args: [] }]);
+    t('Windows: si todo falla, el mensaje dice el motivo', !r2.ok && /No se pudo extraer el \.zip · tar\.exe: .*ENOENT/.test(r2.msg)); }
+  { const w = I.scriptDe('win32').texto; t('Windows: el script no borra su propia carpeta mientras se ejecuta', !/rmdir[^\n]*%STAGE%/.test(w) && /goto relanza/.test(w)); }
   I.limpiaRestos(tmp); fs.rmSync(tmp, { recursive: true, force: true }); console.log('ok', ok, 'ko', ko); process.exit(0);
 })();

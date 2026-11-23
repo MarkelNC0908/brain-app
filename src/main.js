@@ -312,7 +312,12 @@ const instalarMod = require('./instalar');
 let pendiente = null, instalacionLanzada = false;
 const logInst = () => path.join(app.getPath('userData'), 'brain-update.log');
 const zipPropio = (ruta) => { try { const r = path.resolve(String(ruta || '')), d = path.resolve(app.getPath('downloads')); return r.startsWith(d + path.sep) && instalarMod.ZIP_RE.test(path.basename(r)) ? r : ''; } catch { return ''; } };
-const preparaInstalacion = (ruta, esperada) => instalarMod.preparar({ plat: process.platform, arch: process.arch, zip: ruta, esperada: String(esperada || ''), exe: process.execPath, empaquetada: app.isPackaged, temp: app.getPath('temp') });
+const preparaInstalacion = async (ruta, esperada) => {   // el resultado queda en ⚙ Ajustes → Registro
+  diag.info('actualizar', `instalar ${path.basename(String(ruta))} (versión ${esperada || '?'}) sobre ${app.getVersion()}`);
+  const r = await instalarMod.preparar({ plat: process.platform, arch: process.arch, zip: ruta, esperada: String(esperada || ''), exe: process.execPath, empaquetada: app.isPackaged, temp: app.getPath('temp') }).catch(err => ({ ok: false, msg: String(err && err.message || err) }));
+  if (r.ok) diag.info('actualizar', `preparada: se instalará en ${r.dest}`); else diag.error('actualizar', r.msg);
+  return r;
+};
 const quitaPendiente = () => { if (pendiente) { try { fs.rmSync(pendiente.stage, { recursive: true, force: true }); } catch {} pendiente = null; } };
 ipcMain.handle('act:instalar', async (e, ruta, esperada) => {
   if (!fromWin(e) || instalacionLanzada) return { ok: false, msg: 'No permitido' }; const zip = zipPropio(ruta); if (!zip) return { ok: false, msg: 'El fichero no está en Descargas o no es el de este sistema.' };
