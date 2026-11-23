@@ -75,14 +75,31 @@ function casar(row, items) {
   }
   return ms >= 0.6 ? mejor : null;
 }
+// Fila del libro de calificaciones que es una entrega sin completar: ni enviada ni calificada, no exenta, y con plazo o con un estado/intento que lo diga
+// («Sin abrir», «Sin enviar», «No se entregó ningún intento», «Intentos posibles ilimitados»…). Las columnas calculadas (total, media) y la asistencia no cuentan.
+const RE_NO_ENTREGA = /^(total|media|promedio|nota final|calificaci[oó]n final|asistencia)\b/i;
+const RE_PEND_ESTADO = /^(sin abrir|sin enviar|sin entregar|no enviado|pendiente|vencido|atrasado|borrador|en curso)$/i;
+const RE_PEND_INTENTO = /^(No se entreg|Intentos? posibles|\d+ intentos? posibles|Borrador guardado)/i;
+function pendiente(r, hoy) {
+  const nombre = String(r.nombre || '').trim();
+  if (nombre.length < 2 || RE_NO_ENTREGA.test(nombre) || /exento|continuo|calificado|completado|necesita calificaci/i.test(r.estado || '') || /^Se entreg/i.test(r.intentos || '')) return null;
+  const fecha = isoFecha(r.fecha);
+  if (!fecha && !RE_PEND_ESTADO.test(r.estado || '') && !RE_PEND_INTENTO.test(r.intentos || '')) return null;
+  return { fecha, vencida: !!fecha && fecha < hoy };
+}
 function cambios(vault, hoy, filas, sigla) {
   const items = dashboard.build(vault, hoy).items.filter(i => i.sigla === sigla.toUpperCase()), out = [];
   for (const r of filas) {
     if (/^asistencia$/i.test(r.nombre)) continue;
     const etq = r.letra ? `${r.nombre} (nota ${r.letra})` : r.nombre;   // campus con notas en letras (Canvas «letter_grade»): la letra se ve en el panel
     const graded = /calificado/i.test(r.estado || '') && r.nota && !/sin calificar/i.test(r.nota);
-    const col = graded ? 'done' : (/enviado|entregado/i.test(r.estado || '') || /^Se entreg/i.test(r.intentos || '')) ? 'sent' : null;
-    if (!col) continue;
+    const col = graded ? 'done' : ((/enviado|entregado/i.test(r.estado || '') && !/^(no|sin)\b/i.test(r.estado || '')) || /^Se entreg/i.test(r.intentos || '')) ? 'sent' : null;   // «No enviado» no es una entrega
+    if (!col) {   // sin entregar en el campus: si el Brain aún no la tiene, se propone como entrega «Por hacer»
+      const p = pendiente(r, hoy); if (!p) continue;
+      if (casar(r, items) || out.some(x => x.sigla === sigla && jaccard(x.titulo, r.nombre) >= 0.6)) continue;   // ya está en el dashboard (en cualquier columna): no se toca
+      out.push({ tipo: 'crear', sigla, titulo: r.nombre, col: 'todo', nota: '', card: { sigla: sigla.toUpperCase(), titulo: r.nombre, fecha: p.fecha, fuente: 'bb' }, bb: etq, plazo: true, pendiente: true, vencida: p.vencida, sinFecha: !p.fecha });
+      continue;
+    }
     const it = casar(r, items);
     if (it) {
       if (it.col === col) { const a = num(r.nota), b = it.nota != null ? [it.nota, it.max] : null; if (col !== 'done' || (a && b && a[0] === b[0] && a[1] === b[1])) continue; }

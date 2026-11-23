@@ -660,7 +660,7 @@ async function abrirIngesta() {
       const enl = f.tipo === 'enlace', marcada = enl ? !f.ingestado : !f.enEntrada && !f.ingestado && !(f.video && (!f.size || f.size > 100 * 1048576));
       if (marcada) ing.sel.add('f:' + f.id);
     }
-    for (const c of r.cambios) ing.sel.add('c:' + c.id);
+    for (const c of r.cambios) if (!c.vencida) ing.sel.add('c:' + c.id);   // las entregas sin hacer con el plazo ya pasado no se marcan solas: puede que ya no cuenten
   }
   if (view === 'avisos') { drawAvisos(); scrollIng(); }
 }
@@ -692,7 +692,7 @@ function ingPanel() {
     }
     body.append(el('div', 'ih', 'Notas, estados y plazos → entregas del Brain'));
     if (!r.cambios.length) body.append(el('div', 'dsub', `Las notas, estados y plazos de ${campusNombre()} coinciden con tus datos.`));
-    for (const c of r.cambios) fila('c', c.id, `${c.sigla.toUpperCase()} · ${c.titulo} → ${NM[c.col]}${c.nota ? ' ' + c.nota : ''}`, c.tipo === 'crear' ? (c.plazo ? 'Plazo del campus que aún no tienes: se creará su entrega' : 'No existe: se creará su nota de entrega') : `Ahora: ${NM[c.antes] || c.antes}${c.bb !== c.titulo ? ` · en el campus: «${c.bb}»` : ''}`, c.tipo === 'crear' ? 'nueva' : '');
+    for (const c of r.cambios) fila('c', c.id, `${c.sigla.toUpperCase()} · ${c.titulo} → ${NM[c.col]}${c.nota ? ' ' + c.nota : ''}`, c.tipo === 'crear' ? (c.pendiente ? (c.vencida ? `Sin entregar en el campus y el plazo pasó el ${c.card.fecha}: márcala si aún cuenta` : c.sinFecha ? 'Sin entregar en el campus y sin fecha: se creará en «Por hacer»' : `Sin entregar en el campus (plazo ${c.card.fecha}): se creará en «Por hacer»`) : c.plazo ? 'Plazo del campus que aún no tienes: se creará su entrega' : 'No existe: se creará su nota de entrega') : `Ahora: ${NM[c.antes] || c.antes}${c.bb !== c.titulo ? ` · en el campus: «${c.bb}»` : ''}`, c.tipo === 'crear' ? (c.vencida ? 'plazo vencido' : c.pendiente ? 'sin entregar' : 'nueva') : '');
     const todo = (on) => { body.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = on; }); ing.sel = new Set(on ? [...ing.r.ficheros.map(f => 'f:' + f.id), ...ing.r.cambios.map(c => 'c:' + c.id)] : []); act(); };
     const bar = el('div', 'row'), b1 = el('button', null, 'Marcar todo'), b2 = el('button', null, 'Desmarcar todo');
     b1.onclick = () => todo(true); b2.onclick = () => todo(false);

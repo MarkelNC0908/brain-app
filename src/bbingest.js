@@ -77,8 +77,8 @@ async function descargar(vault, f, idx, n) {
 // ---- notas y estados (página «Libro de calificaciones» de cada curso) ----
 function parseNotas(texto) {
   const toks = texto.split(/[\n\t]+/).map(s => s.trim()).filter(Boolean), i0 = toks.findIndex(t => /^Resultados$/i.test(t));
-  const fecha = /^\d{1,2}\/\d{1,2}\/\d{2,4}$/, nota = /^(\d+(?:[.,]\d+)?\/\d+(?:[.,]\d+)?|Sin calificar)$/i, intento = /^(Se entreg|No se entreg|Intento\s+\d+|Borrador guardado)/i;   // anotaciones de la fila anterior («No se entregó ningún intento», «Intento 2 iniciado (0 atrasado)»…), no son un elemento nuevo
-  const estado = /^(Calificado|Enviado|Sin enviar|Entregado|Pendiente|Completado|Vencido|Borrador|En curso|Necesita calificaci[oó]n|Exento|Continuo)$/i;
+  const fecha = /^\d{1,2}\/\d{1,2}\/\d{2,4}$/, nota = /^(\d+(?:[.,]\d+)?\/\d+(?:[.,]\d+)?|Sin calificar)$/i, intento = /^(Se entreg|No se entreg|Intento\s+\d+|Intentos? posibles|\d+ intentos? posibles|Borrador guardado)/i;   // anotaciones de la fila anterior («No se entregó ningún intento», «Intento 2 iniciado (0 atrasado)», «Intentos posibles ilimitados»…), no son un elemento nuevo
+  const estado = /^(Calificado|Enviado|Sin enviar|Sin abrir|No enviado|Sin entregar|Atrasado|Entregado|Pendiente|Completado|Vencido|Borrador|En curso|Necesita calificaci[oó]n|Exento|Continuo)$/i;   // «Sin abrir»: tarea publicada que aún no has empezado
   const rows = []; let cur = null;
   for (const tk of toks.slice(i0 + 1)) {
     if (/^Vista$/i.test(tk)) continue;
@@ -143,7 +143,7 @@ async function aplicar(vault, hoy, idsFicheros, idsCambios, descartar) {
   const porAsig = {}; for (const f of sel.filter(f => f.tipo === 'enlace')) (porAsig[f.sigla] ||= []).push(f);
   for (const [sg, lst] of Object.entries(porAsig)) { try { res.enlaces += guardarEnlaces(vault, sg, lst).n; lst.forEach(f => hechos.add(f.id)); } catch (e) { res.errores.push(`enlaces de ${sg}: ${e.message}`); } }
   for (const c of ultimo.cambios.filter(c => idsCambios.includes(c.id))) {
-    try { dashboard.move(vault, c.card, c.col, c.nota, hoy); res.cambios.push(`${c.sigla.toUpperCase()} · ${c.titulo}`); } catch (e) { res.errores.push(`${c.titulo}: ${e.message}`); }
+    try { dashboard.move(vault, c.card, c.col, c.nota, hoy, c.tipo === 'crear' ? { creada: true } : undefined); res.cambios.push(`${c.sigla.toUpperCase()} · ${c.titulo}`); } catch (e) { res.errores.push(`${c.titulo}: ${e.message}`); }
   }
   for (const f of ultimo.ficheros.filter(f => descartar.includes(f.id))) { hechos.add(f.id); res.descartados++; }
   abortar = null; saveState(); res.ok = true; return res;
@@ -161,14 +161,14 @@ function filaNota(r) {
 }
 // El texto de la página mete ruido entre las filas: paginador («Página 1 de 1»), «La calificación está completa.» (marca de la fila anterior) y la asistencia (no es un trabajo ni un examen)
 const RUIDO_NOTAS = /^(la calificaci[oó]n est[aá] (in)?completa\.?|p[aá]gina(\s+\d+)?(\s+de\s+\d+)?|de\s+\d+|\d+)$/i;
-const ANOT_NOTAS = /^(No se entreg[oó] ning[uú]n intento|Se entreg|Intento\s+\d+|Borrador guardado)/i;
+const ANOT_NOTAS = /^(No se entreg[oó] ning[uú]n intento|Se entreg|Intento\s+\d+|Intentos? posibles|\d+ intentos? posibles|Borrador guardado|Sin abrir)$|^(No se entreg|Se entreg|Intento\s+\d+|Intentos? posibles)/i;
 function limpiaFilas(filas) {
   const out = [];
   for (const r of filas || []) {
     const n = String(r.nombre || '').trim(), p = out[out.length - 1];
     if (RUIDO_NOTAS.test(n)) { if (/est[aá] completa/i.test(n) && p) p.completa = true; continue; }
     if (ANOT_NOTAS.test(n)) {   // una anotación que quedó como fila (datos guardados con el lector anterior): sus datos son de la fila anterior
-      if (p) { if (!p.estado && r.estado) p.estado = r.estado; if (!p.fecha && r.fecha) p.fecha = r.fecha; if (p.nota == null && r.nota != null) { p.nota = r.nota; p.max = r.max; p.notaTexto = r.notaTexto; } if (!p.sinCalificar && r.sinCalificar) p.sinCalificar = true; }
+      if (p) { if (!p.estado && /^Sin abrir$/i.test(n)) p.estado = 'Sin abrir'; if (!p.estado && r.estado) p.estado = r.estado; if (!p.fecha && r.fecha) p.fecha = r.fecha; if (p.nota == null && r.nota != null) { p.nota = r.nota; p.max = r.max; p.notaTexto = r.notaTexto; } if (!p.sinCalificar && r.sinCalificar) p.sinCalificar = true; }
       continue;
     }
     if (/^asistencia$/i.test(n) || /^continuo$/i.test(r.estado || '')) continue;
