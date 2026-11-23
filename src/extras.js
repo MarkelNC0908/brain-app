@@ -476,6 +476,50 @@ function pintaDiagnostico() {
 }
 
 
+// ---------- 8b · Registro: qué ha hecho la app (arranque, inicio de sesión, ventanas del campus) y sus errores. Solo en este equipo ----------
+const NIVEL_TXT = { info: 'info', aviso: 'aviso', error: 'error' };
+const lineaTxt = (l) => `${l.fecha} [${l.nivel}] ${l.tag}: ${l.msg}`;
+const horaLog = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }); };
+let logFiltro = 'todo';
+// Pinta el registro dentro de «w» (la sección de Ajustes o la ventana que se abre desde la pantalla de perfiles)
+function pintaRegistro(w) {
+  if (!w) return; w.replaceChildren(); w.append(el('h2', null, '📜 Registro'));
+  if (!esEscritorio() || !window.brain.logLeer) { w.append(el('p', 'dsub', 'El registro solo está en la app de escritorio.')); return; }
+  w.append(el('p', 'dsub', 'Lo que hace la app (arranque, entrar en el perfil, inicio de sesión del campus y las páginas por las que pasa) y los errores. Se guarda solo en este equipo, sin contraseñas, tokens ni parámetros de las direcciones. Si algo no funciona, cópialo y pásaselo a quien te ayude.'));
+  const row = el('div', 'aj-add'), sel = el('select'), act = el('button', null, '↻ Actualizar'), cop = el('button', 'pri', 'Copiar'), car = el('button', null, 'Abrir carpeta'), bor = el('button', null, 'Vaciar'), av = el('p', 'dsub', ''), lista = el('div', 'log-lista');
+  for (const [v, t] of [['todo', 'Todo'], ['aviso', 'Avisos y errores'], ['error', 'Solo errores']]) sel.append(Object.assign(el('option', null, t), { value: v }));
+  sel.value = logFiltro; row.append(sel, act, cop, car, bor); w.append(row, av, lista);
+  let lineas = [], seguro = false;
+  const filtradas = () => lineas.filter(l => logFiltro === 'todo' || (logFiltro === 'aviso' ? l.nivel !== 'info' : l.nivel === 'error'));
+  const dibuja = () => {
+    lista.replaceChildren(); const fs = filtradas().slice(-300).reverse();   // lo más reciente arriba
+    if (!fs.length) { lista.append(el('p', 'dsub', lineas.length ? 'No hay líneas con este filtro.' : 'El registro está vacío.')); return; }
+    for (const l of fs) { const r = el('div', 'log-l ' + (NIVEL_TXT[l.nivel] || 'info')); r.append(el('span', 'log-h', horaLog(l.fecha)), el('span', 'log-n', NIVEL_TXT[l.nivel] || l.nivel), el('span', 'log-t', l.tag), el('span', 'log-m', l.msg)); lista.append(r); }
+  };
+  const carga = async () => {
+    act.disabled = true; let r; try { r = await window.brain.logLeer(); } catch { r = null; } act.disabled = false;
+    if (!r || !r.ok) { av.textContent = 'No se pudo leer el registro.'; return; }
+    lineas = r.lineas || []; const e = lineas.filter(l => l.nivel === 'error').length;
+    av.textContent = `${lineas.length} línea(s) · ${e} error(es) · ${r.ruta}`; dibuja();
+  };
+  sel.onchange = () => { logFiltro = sel.value; dibuja(); };
+  act.onclick = carga;
+  cop.onclick = async () => {
+    const txt = filtradas().map(lineaTxt).join('\n'); if (!txt) { av.textContent = 'No hay nada que copiar.'; return; }
+    try { await navigator.clipboard.writeText(txt); av.textContent = `✓ Copiadas ${filtradas().length} línea(s) al portapapeles.`; } catch { av.textContent = 'No se pudo copiar solo: abre la carpeta y adjunta el fichero brain.log.'; }
+  };
+  car.onclick = () => window.brain.diagCarpeta && window.brain.diagCarpeta();
+  bor.onclick = async () => { if (!seguro) { seguro = true; bor.textContent = '¿Seguro? Pulsa otra vez'; return; } seguro = false; bor.textContent = 'Vaciar'; await window.brain.logBorrar(); carga(); };
+  carga();
+}
+// Desde la pantalla de perfiles (antes de entrar en la app): el mismo registro en una ventana encima
+function abreRegistro() {
+  const ov = el('div', 'ov arriba'), b = el('div', 'box log-box'), cerrar = el('button', null, 'Cerrar'), cont = el('div');
+  b.append(cont, cerrar); ov.append(b); document.body.append(ov); pintaRegistro(cont);
+  const fuera = () => { ov.remove(); document.removeEventListener('keydown', esc); }, esc = (e) => { if (e.key === 'Escape') fuera(); };
+  cerrar.onclick = fuera; ov.onclick = (e) => { if (e.target === ov) fuera(); }; document.addEventListener('keydown', esc);
+}
+
 // ---------- 10 · Actualizaciones: buscar y descargar la versión nueva desde los Releases públicos de GitHub (token opcional para repositorios privados) ----------
 let actEst = null, actRes = null, actMsg = '', actProg = null, actDescarga = null, actNueva = null;
 const fmtMB = (b) => (b / 1048576).toFixed(b > 1048576 * 10 ? 0 : 1) + ' MB';

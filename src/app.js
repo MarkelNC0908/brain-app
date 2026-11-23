@@ -954,8 +954,8 @@ let enlaces = null, enlMsg = '';   // enlaces = { campus, lista:[{nombre,url}] }
 function drawAjustes() {
   doc.replaceChildren(); $('#crumb').textContent = 'Ajustes';
   const head = el('div', 'dh'); head.append(el('h1', null, 'Ajustes')); doc.append(head);
-  const s0 = el('div', 'aj-sec'); s0.id = 'aj-ses'; const a = el('div', 'aj-sec'); a.id = 'aj-enl'; const c0 = el('div', 'aj-sec'); c0.id = 'aj-cal'; const pv = el('div', 'aj-sec'); pv.id = 'aj-priv'; const av = el('div', 'aj-sec'); av.id = 'aj-avisos'; const ap = el('div', 'aj-sec'); ap.id = 'aj-apar'; const cp = el('div', 'aj-sec'); cp.id = 'aj-copia'; const dg = el('div', 'aj-sec'); dg.id = 'aj-diag'; const up = el('div', 'aj-sec'); up.id = 'aj-act'; const mv = el('div', 'aj-sec'); mv.id = 'aj-movil'; const b = el('div', 'aj-sec'); b.id = 'rs-cfg'; doc.append(s0, a, c0, av, ap, pv, cp, up, mv, dg, b);
-  pintaSesion(); pintaEnlaces(); if (typeof pintaCalendario === 'function') pintaCalendario(); if (typeof pintaAvisosAjustes === 'function') pintaAvisosAjustes(); if (typeof pintaPrivacidad === 'function') pintaPrivacidad(); if (typeof pintaApariencia === 'function') pintaApariencia(); if (typeof pintaCopia === 'function') pintaCopia(); if (typeof pintaDiagnostico === 'function') pintaDiagnostico(); if (typeof pintaActualizar === 'function') pintaActualizar(); if (typeof pintaMovil === 'function') pintaMovil(); pintaCfg();
+  const s0 = el('div', 'aj-sec'); s0.id = 'aj-ses'; const a = el('div', 'aj-sec'); a.id = 'aj-enl'; const c0 = el('div', 'aj-sec'); c0.id = 'aj-cal'; const pv = el('div', 'aj-sec'); pv.id = 'aj-priv'; const av = el('div', 'aj-sec'); av.id = 'aj-avisos'; const ap = el('div', 'aj-sec'); ap.id = 'aj-apar'; const cp = el('div', 'aj-sec'); cp.id = 'aj-copia'; const dg = el('div', 'aj-sec'); dg.id = 'aj-diag'; const lg = el('div', 'aj-sec'); lg.id = 'aj-log'; const up = el('div', 'aj-sec'); up.id = 'aj-act'; const mv = el('div', 'aj-sec'); mv.id = 'aj-movil'; const b = el('div', 'aj-sec'); b.id = 'rs-cfg'; doc.append(s0, a, c0, av, ap, pv, cp, up, mv, dg, lg, b);
+  pintaSesion(); pintaEnlaces(); if (typeof pintaCalendario === 'function') pintaCalendario(); if (typeof pintaAvisosAjustes === 'function') pintaAvisosAjustes(); if (typeof pintaPrivacidad === 'function') pintaPrivacidad(); if (typeof pintaApariencia === 'function') pintaApariencia(); if (typeof pintaCopia === 'function') pintaCopia(); if (typeof pintaDiagnostico === 'function') pintaDiagnostico(); if (typeof pintaRegistro === 'function') pintaRegistro($('#aj-log')); if (typeof pintaActualizar === 'function') pintaActualizar(); if (typeof pintaMovil === 'function') pintaMovil(); pintaCfg();
 }
 // Sesión del campus: se inicia aquí una vez y vale para Avisos, Mensajes, Notas e Ingestar novedades (misma sesión del perfil)
 function pintaSesion() {
@@ -966,13 +966,18 @@ function pintaSesion() {
   const f = el('div', 'aj-ses'); f.append(el('i', 'led ' + cls), el('b', null, txt), bb && bb.lastCheck ? el('span', 'nt-n', 'comprobada ' + new Date(bb.lastCheck).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })) : document.createTextNode('')); w.append(f);
   w.append(el('p', 'dsub', 'Inicia sesión aquí una sola vez: vale para Avisos, Mensajes, Notas e «Ingestar novedades». No hace falta volver a hacerlo en cada apartado.'));
   const row = el('div', 'aj-add');
-  if (st === 'sin-campus' && typeof editarPerfil === 'function') { const b = el('button', 'pri', 'Añadir la URL del campus'); b.onclick = () => editarPerfil(); row.append(b); }
+  if (st === 'sin-campus' && typeof editarPerfil === 'function') { const b = el('button', 'pri', 'Añadir la URL del campus'); b.onclick = () => editarPerfil(); row.append(b); w.append(row); return; }
   else {
-    const ok = st === 'ok' || st === 'vacio', b = el('button', ok ? '' : 'pri', ok ? 'Abrir ' + campusNombre() : 'Iniciar sesión'); b.onclick = () => window.brain.bbLogin();
+    const ok = st === 'ok' || st === 'vacio', b = el('button', ok ? '' : 'pri', ok ? 'Abrir ' + campusNombre() : 'Iniciar sesión');
+    b.onclick = async () => {   // si no se abre la ventana, se dice por qué (y queda en ⚙ Ajustes → Registro)
+      res.textContent = 'Abriendo la ventana de ' + campusNombre() + '…';
+      let r; try { r = await window.brain.bbLogin(); } catch (e) { r = { ok: false, msg: String((e && e.message) || e) }; if (window.brain.logEvento) window.brain.logEvento('error', 'sesion', 'bbLogin falló: ' + r.msg); }
+      res.textContent = r && r.ok === false ? '⚠ ' + (r.msg || 'No se pudo abrir la ventana de inicio de sesión') + ' · detalles en «Registro», más abajo.' : r && r.yaAbierta ? 'La ventana de inicio de sesión ya estaba abierta: se ha traído al frente.' : 'Inicia sesión en la ventana nueva y ciérrala al terminar.';
+    };
     const c = el('button', null, 'Comprobar sesión'); c.onclick = async () => { c.disabled = true; c.textContent = 'Comprobando…'; try { await window.brain.bbCheck(); } catch {} await loadBB(); };
     row.append(b, c);
   }
-  w.append(row);
+  const res = el('p', 'dsub', ''); w.append(row, res);
 }
 function pintaEnlaces() {
   const w = $('#aj-enl'); if (!w) return; w.replaceChildren(); w.append(el('h2', null, '🎓 Enlaces del campus virtual'));

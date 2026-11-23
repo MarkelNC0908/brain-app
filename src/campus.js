@@ -7,6 +7,7 @@ const M = require('./matcher');
 const dashboard = require('./dashboard');
 const { NeedLogin } = require('./lms-comun');
 const L = require('./layout');
+const R = require('./diagnostico');
 
 const TIPOS = { blackboard: 'Blackboard', moodle: 'Moodle', canvas: 'Canvas', ical: 'Calendario iCal' };
 const VENTANA_DIAS = 45;
@@ -52,12 +53,16 @@ function crear(ad) {
     },
     state,
     marcarVistas() { st.novedades.forEach(n => { n.visto = true; }); save(); return state(); },
-    abrir(onClosed) {
-      if (!cfg || !ad.loginUrl || !ad.configurado(cfg)) return;
-      if (loginWin && !loginWin.isDestroyed()) { loginWin.focus(); return; }
+    abrir(onClosed) {   // devuelve { ok, msg } para que la pantalla diga por qué no se abre
+      if (!cfg) { R.aviso('sesion', 'Iniciar sesión pulsado sin perfil activo'); return { ok: false, msg: 'No hay ningún perfil activo' }; }
+      if (!ad.loginUrl) { R.aviso('sesion', `${ad.etiqueta} no usa inicio de sesión`); return { ok: false, msg: `${ad.etiqueta} no necesita iniciar sesión` }; }
+      if (!ad.configurado(cfg)) { R.aviso('sesion', `Iniciar sesión pulsado sin URL de ${ad.etiqueta} en el perfil`); return { ok: false, msg: `Falta la URL de ${ad.etiqueta} en tu perfil (✎ Editar perfil)` }; }
+      if (loginWin && !loginWin.isDestroyed()) { R.info('sesion', 'la ventana de inicio de sesión ya estaba abierta: se trae al frente'); if (loginWin.isMinimized()) loginWin.restore(); loginWin.show(); loginWin.focus(); return { ok: true, yaAbierta: true }; }
       loginWin = new BrowserWindow({ width: 1100, height: 800, title: ad.etiqueta, webPreferences: { partition: cfg.partition, contextIsolation: true, sandbox: true, nodeIntegration: false } });
-      loginWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) loginWin.loadURL(url); return { action: 'deny' }; });
-      loginWin.loadURL(ad.loginUrl(cfg)); loginWin.on('closed', () => { loginWin = null; if (onClosed) onClosed(); });
+      R.vigilaVentana(loginWin, 'sesion');
+      loginWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) R.carga(loginWin, url, 'sesion'); else R.aviso('sesion', `ventana emergente bloqueada (no es https): ${R.limpiaUrl(url)}`); return { action: 'deny' }; });
+      R.carga(loginWin, ad.loginUrl(cfg), 'sesion'); loginWin.on('closed', () => { loginWin = null; if (onClosed) onClosed(); });
+      return { ok: true };
     },
   };
 

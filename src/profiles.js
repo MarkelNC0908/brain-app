@@ -33,10 +33,13 @@ function datos(p) {
   const u = app.getPath('userData'), legacy = p.id === 'default', suf = legacy ? '' : '-' + p.id;
   return { partition: legacy ? 'persist:blackboard' : 'persist:bb-' + p.id, bbState: path.join(u, `blackboard${suf}.json`), bbIngesta: path.join(u, `bb-ingesta${suf}.json`), avisos: path.join(u, `avisos${suf}.json`), mensajes: path.join(u, `mensajes${suf}.json`), notas: path.join(u, `notas${suf}.json`), ia: path.join(u, `ia${suf}.json`), enlaces: path.join(u, `enlaces${suf}.json`), act: path.join(u, `actualizar${suf}.json`), ajustes: path.join(u, `ajustes${suf}.json`) };
 }
+const esPaginaDeLogin = (x) => /^(id-?provider|idp|sso|login|cas|adfs|sts|auth)[.-]/i.test(x.hostname) || /^login\.(microsoftonline|live|microsoft)\.com$/i.test(x.hostname) || /\/(idp\/profile|saml2?|simplesaml|cas\/login|adfs\/ls|shibboleth)(\/|$)/i.test(x.pathname);
 function limpiaCampus(u, conservarRuta) {
   const s = String(u || '').trim(); if (!s) return '';
   let x; try { x = new URL(/^https?:\/\//i.test(s) ? s : 'https://' + s); } catch { throw new Error('La URL del campus no es válida'); }
   if (x.protocol !== 'https:') throw new Error('La URL del campus debe empezar por https://');
+  // La página de inicio de sesión de la universidad (SSO: SAML/Shibboleth, CAS, ADFS, Microsoft) no es el campus: con ella la app abre páginas que no existen
+  if (esPaginaDeLogin(x)) throw new Error(`«${x.host}» es la página de inicio de sesión de tu universidad, no el campus. Pon la dirección del campus o del aula (la que ves en la barra del navegador una vez dentro, p. ej. https://universidad.instructure.com); al pulsar «Iniciar sesión», la app ya te llevará a esta página.`);
   // Blackboard y Canvas cuelgan de la raíz (la app añade sola /ultra/stream, /api/v1/…); Moodle a veces vive en una subcarpeta (https://uni.es/moodle)
   return conservarRuta ? x.origin + x.pathname.replace(/\/+$/, '') : x.origin;
 }
@@ -81,4 +84,4 @@ function borrar(id, pin) {
 }
 const lista = () => db.profiles.map(vista);
 const marcarUltimo = (id) => { db.last = id; guardar(); };
-module.exports = { TIPOS, tipoDe, cargar, lista, buscar, datos, crear, editar, borrar, pinOk, marcarUltimo, vista, tieneBrain, esDir, ultimo: () => db.last };
+module.exports = { _esPaginaDeLogin: (u) => esPaginaDeLogin(new URL(u)), TIPOS, tipoDe, cargar, lista, buscar, datos, crear, editar, borrar, pinOk, marcarUltimo, vista, tieneBrain, esDir, ultimo: () => db.last };

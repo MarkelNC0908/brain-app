@@ -79,6 +79,7 @@ function cambios(vault, hoy, filas, sigla) {
   const items = dashboard.build(vault, hoy).items.filter(i => i.sigla === sigla.toUpperCase()), out = [];
   for (const r of filas) {
     if (/^asistencia$/i.test(r.nombre)) continue;
+    const etq = r.letra ? `${r.nombre} (nota ${r.letra})` : r.nombre;   // campus con notas en letras (Canvas «letter_grade»): la letra se ve en el panel
     const graded = /calificado/i.test(r.estado || '') && r.nota && !/sin calificar/i.test(r.nota);
     const col = graded ? 'done' : (/enviado|entregado/i.test(r.estado || '') || /^Se entreg/i.test(r.intentos || '')) ? 'sent' : null;
     if (!col) continue;
@@ -86,8 +87,8 @@ function cambios(vault, hoy, filas, sigla) {
     if (it) {
       if (it.col === col) { const a = num(r.nota), b = it.nota != null ? [it.nota, it.max] : null; if (col !== 'done' || (a && b && a[0] === b[0] && a[1] === b[1])) continue; }
       else if (it.col === 'done' && col === 'sent') continue;   // nunca se degrada una entrega ya corregida
-      out.push({ tipo: 'actualizar', sigla, titulo: it.titulo, col, nota: graded ? r.nota : '', antes: it.col, card: { sigla: it.sigla, titulo: it.titulo, fecha: it.fecha, fuente: it.fuente }, bb: r.nombre });
-    } else out.push({ tipo: 'crear', sigla, titulo: r.nombre, col, nota: graded ? r.nota : '', card: { sigla: sigla.toUpperCase(), titulo: r.nombre, fecha: isoFecha(r.fecha), fuente: 'bb' }, bb: r.nombre });
+      out.push({ tipo: 'actualizar', sigla, titulo: it.titulo, col, nota: graded ? r.nota : '', antes: it.col, card: { sigla: it.sigla, titulo: it.titulo, fecha: it.fecha, fuente: it.fuente }, bb: etq });
+    } else out.push({ tipo: 'crear', sigla, titulo: r.nombre, col, nota: graded ? r.nota : '', card: { sigla: sigla.toUpperCase(), titulo: r.nombre, fecha: isoFecha(r.fecha), fuente: 'bb' }, bb: etq });
   }
   return out;
 }

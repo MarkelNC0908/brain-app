@@ -260,3 +260,13 @@ body:not([data-os=darwin]) #bar{height:40px}
 
 .flash{animation:flashh 5s ease-out}@keyframes flashh{0%,60%{background:#ffd60a66}100%{background:transparent}}mark.flash-m{background:#ffd60a99;color:inherit;border-radius:3px;padding:0 2px}
 .qr-movil{display:block;width:216px;height:216px;image-rendering:pixelated;background:#fff;padding:8px;border-radius:12px;margin:10px 0}
+
+/* Registro (⚙ Ajustes → Registro y «Ver registro» en la pantalla de perfiles) */
+.log-lista{max-height:360px;overflow:auto;background:var(--code);border-radius:8px;padding:6px 8px;margin:6px 0;font:11.5px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.log-l{display:grid;grid-template-columns:auto auto auto 1fr;gap:8px;padding:2px 0;border-bottom:1px solid var(--line);align-items:baseline}
+.log-l:last-child{border-bottom:0}
+.log-h{color:var(--mut);white-space:nowrap}.log-t{color:var(--mut)}.log-m{word-break:break-word;min-width:0}
+.log-n{font-weight:600;text-transform:uppercase;font-size:10px}.log-l.info .log-n{color:var(--mut)}.log-l.aviso .log-n{color:var(--warn)}.log-l.error .log-n,.log-l.error .log-m{color:var(--err)}
+.log-box{width:min(860px,calc(100vw - 32px));max-height:calc(100vh - 48px);overflow:auto}
+.ver-log{margin-top:4px;font-size:12px}
+@media (max-width:620px){.log-l{grid-template-columns:auto 1fr}.log-t,.log-h{display:none}}

@@ -298,11 +298,14 @@ async function check({ soloResumen, silencioso, onClick, onCambio } = {}) {
 
 // Ventana visible para iniciar sesión (la misma que Avisos); al cerrarla se vuelve a leer
 function abrir(onClosed) {
-  if (!cfg || !cfg.campus) return;
-  if (loginWin && !loginWin.isDestroyed()) { loginWin.focus(); return; }
+  const R = require('./diagnostico');
+  if (!cfg || !cfg.campus) { R.aviso('mensajes', 'abrir Blackboard pulsado sin URL del campus'); return { ok: false, msg: 'Falta la URL del campus en tu perfil (✎ Editar perfil)' }; }
+  if (loginWin && !loginWin.isDestroyed()) { if (loginWin.isMinimized()) loginWin.restore(); loginWin.show(); loginWin.focus(); return { ok: true, yaAbierta: true }; }
   loginWin = new BrowserWindow({ width: 1100, height: 800, title: 'Blackboard', webPreferences: { partition: cfg.partition, contextIsolation: true, sandbox: true, nodeIntegration: false } });
-  loginWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) loginWin.loadURL(url); return { action: 'deny' }; });
-  loginWin.loadURL(cfg.campus + '/ultra/messages');
+  R.vigilaVentana(loginWin, 'mensajes');
+  loginWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) R.carga(loginWin, url, 'mensajes'); else R.aviso('mensajes', `ventana emergente bloqueada (no es https): ${R.limpiaUrl(url)}`); return { action: 'deny' }; });
+  R.carga(loginWin, cfg.campus + '/ultra/messages', 'mensajes');
   loginWin.on('closed', () => { loginWin = null; if (onClosed) onClosed(); });
+  return { ok: true };
 }
 module.exports = { init, check, state, abrir, hilo, destinatarios, redaccionCerrar, enviar, _limpia: limpia, _nombre: nombre };

@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { siglaDeCurso } = require('./cursos');
+const R = require('./diagnostico');
 // Contexto del perfil activo: { campus (origen https), partition (sesión propia del perfil), stateFile, asignaturas() }
 let cfg = null;
 const enCampus = (u) => !!cfg && !!cfg.campus && String(u).startsWith(cfg.campus + '/ultra/');
@@ -90,12 +91,16 @@ function state() { return { status: st.status, msg: st.msg, lastCheck: st.lastCh
 function marcarVistas() { st.novedades.forEach(n => { n.visto = true; }); save(); return state(); }
 
 // Ventana visible para iniciar sesión (SSO incluido). Al cerrarla se vuelve a revisar.
+// Devuelve { ok, msg } para que la pantalla diga por qué no se abre, en vez de no hacer nada
 function abrir(onClosed) {
-  if (!cfg || !cfg.campus) return;
-  if (loginWin && !loginWin.isDestroyed()) { loginWin.focus(); return; }
+  if (!cfg) { R.aviso('sesion', 'Iniciar sesión pulsado sin perfil activo'); return { ok: false, msg: 'No hay ningún perfil activo' }; }
+  if (!cfg.campus) { R.aviso('sesion', 'Iniciar sesión pulsado sin URL del campus en el perfil'); return { ok: false, msg: 'Falta la URL del campus en tu perfil (✎ Editar perfil)' }; }
+  if (loginWin && !loginWin.isDestroyed()) { R.info('sesion', 'la ventana de inicio de sesión ya estaba abierta: se trae al frente'); if (loginWin.isMinimized()) loginWin.restore(); loginWin.show(); loginWin.focus(); return { ok: true, yaAbierta: true }; }
   loginWin = new BrowserWindow({ width: 1100, height: 800, title: 'Blackboard', webPreferences: { partition: cfg.partition, contextIsolation: true, sandbox: true, nodeIntegration: false } });
-  loginWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) loginWin.loadURL(url); return { action: 'deny' }; });
-  loginWin.loadURL(urlStream());
+  R.vigilaVentana(loginWin, 'sesion');
+  loginWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) R.carga(loginWin, url, 'sesion'); else R.aviso('sesion', `ventana emergente bloqueada (no es https): ${R.limpiaUrl(url)}`); return { action: 'deny' }; });
+  R.carga(loginWin, urlStream(), 'sesion');
   loginWin.on('closed', () => { loginWin = null; if (onClosed) onClosed(); });
+  return { ok: true };
 }
 module.exports = { init, check, state, marcarVistas, abrir, _normaliza: normaliza };

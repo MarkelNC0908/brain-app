@@ -40,11 +40,13 @@ function pantallaPerfiles(st) {
       const add = el('div', 'pcard'), plus = el('div', 'av', '+'); plus.style.setProperty('--c', 'var(--mut)'); add.append(plus, el('b', null, 'Nuevo perfil'), el('small', null, 'otra persona o Brain'));
       add.onclick = () => { o.replaceChildren(el('h1', null, 'Nuevo perfil'), formPerfil(null, s, fin, () => dibuja(s))); }; add.tabIndex = 0; add.setAttribute('role', 'button'); add.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); add.onclick(); } };
       cards.append(add); o.append(cards, el('p', 'note', 'Pulsa ✎ en un perfil para editarlo o añadirle un PIN.'), msg);
+      if (window.brain.logLeer && typeof abreRegistro === 'function') { const lg = el('button', 'ver-log', '📜 Ver registro'); lg.title = 'Lo que ha hecho la app y los errores, para pedir ayuda si algo no funciona'; lg.onclick = () => abreRegistro(); o.append(lg); }
     };
     const entrar = async (p, msg) => {
       let pin = ''; if (p.hasPin) { pin = await pedirPin(p.name); if (pin === null) return; }
-      msg.textContent = 'Entrando…'; const r = await window.brain.profLogin(p.id, pin);
-      if (r.ok) fin(r); else msg.textContent = r.msg;
+      msg.textContent = 'Entrando…'; let r;
+      try { r = await window.brain.profLogin(p.id, pin); } catch (e) { r = { ok: false, msg: 'No se pudo entrar: ' + ((e && e.message) || e) }; if (window.brain.logEvento) window.brain.logEvento('error', 'perfil', 'profLogin falló: ' + r.msg); }
+      if (r && r.ok) fin(r); else msg.textContent = ((r && r.msg) || 'No se pudo entrar') + (typeof abreRegistro === 'function' ? ' · pulsa «Ver registro» para ver el detalle.' : '');
     };
     dibuja(st);
   });

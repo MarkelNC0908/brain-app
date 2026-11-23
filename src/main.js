@@ -213,10 +213,17 @@ ipcMain.handle('nota:guardar', (e, d) => {
 // Diagnóstico: registro local de errores (userData/brain.log) e informe que el usuario puede copiar. No se envía nada.
 const diag = require('./diagnostico'), logFile = () => path.join(app.getPath('userData'), 'brain.log');
 const logError = (tag, e) => diag.logLinea(logFile(), 'error', tag, (e && e.stack) || e);
+diag.fijaRegistro(logFile);   // los módulos (inicio de sesión, campus…) escriben en el mismo registro
+app.whenReady().then(() => diag.info('app', `arranca Brain ${app.getVersion()} · ${process.platform} ${process.arch} (${os_release()}) · Electron ${process.versions.electron} · idioma ${app.getLocale()}${app.isPackaged ? '' : ' · sin empaquetar'}`));
 process.on('uncaughtException', (e) => logError('main', e));
 process.on('unhandledRejection', (e) => logError('promesa', e));
 let erroresVentana = 0;
 ipcMain.on('log:error', (e, msg) => { if (fromWin(e) && erroresVentana++ < 60) diag.logLinea(logFile(), 'error', 'ventana', String(msg || '').slice(0, 1500)); });
+// Pasos que apunta la ventana (p. ej. «pulsado Iniciar sesión»); con tope para que un bucle no llene el disco
+let eventosVentana = 0;
+ipcMain.on('log:evento', (e, nivel, tag, msg) => { if (fromWin(e) && eventosVentana++ < 300) diag.logLinea(logFile(), ['info', 'aviso', 'error'].includes(nivel) ? nivel : 'info', 'ui·' + String(tag || 'ventana').replace(/[^\w·-]/g, '').slice(0, 20), String(msg || '').slice(0, 1000)); });
+ipcMain.handle('log:leer', (e) => (fromWin(e) ? { ok: true, lineas: diag.leeRegistro(logFile(), 500), ruta: diag.limpiaSecretos(logFile()) } : { ok: false }));
+ipcMain.handle('log:borrar', (e) => { if (!fromWin(e)) return { ok: false }; diag.borraRegistro(logFile()); diag.info('app', `registro vaciado por el usuario (Brain ${app.getVersion()} · ${process.platform})`); return { ok: true }; });
 ipcMain.handle('diag:informe', async (e) => {
   if (!fromWin(e)) return { ok: false };
   let campus = ''; try { campus = profile && profile.campusUrl ? new URL(profile.campusUrl).hostname : ''; } catch {}
@@ -357,14 +364,28 @@ ipcMain.handle('msg:enviar', async (e, d) => {   // solo desde la ventana de la 
   if (r.enviado === true || r.enviado === 'desconocido') mensajesMod.check({ silencioso: true, onCambio: avisaMensajes }).then(avisaMensajes);   // se vuelve a leer la lista para ver el mensaje nuevo
   return r;
 });
-ipcMain.handle('msg:login', (e) => { if (fromWin(e)) mensajesMod.abrir(() => { mensajesMod.check({ silencioso: true, onCambio: avisaMensajes }).then(avisaMensajes); }); });
+ipcMain.handle('msg:login', (e) => { if (!fromWin(e)) return { ok: false }; diag.info('mensajes', 'pulsado abrir Blackboard desde Mensajes'); return mensajesMod.abrir(() => { mensajesMod.check({ silencioso: true, onCambio: avisaMensajes }).then(avisaMensajes); }); });
 ipcMain.handle('bbi:scan', (e) => (fromWin(e) && vault ? cur.ingesta.escanear(vault, hoyISO()) : { ok: false, msg: 'No permitido' }));
 ipcMain.handle('bbi:apply', (e, f, c, d) => (fromWin(e) && vault ? cur.ingesta.aplicar(vault, hoyISO(), Array.isArray(f) ? f : [], Array.isArray(c) ? c : [], Array.isArray(d) ? d : []) : { ok: false, msg: 'No permitido' }));
 ipcMain.handle('bbi:cancel', (e) => { if (fromWin(e)) cur.ingesta.cancelar(); });
 ipcMain.handle('bb:state', () => cur.avisos.state());
-ipcMain.handle('bb:check', (e) => (fromWin(e) ? revisarBB(true) : null));   // revisión manual: sin notificación del sistema, el resultado se ve en pantalla
+ipcMain.handle('bb:check', (e) => (fromWin(e) ? revisarBB(true).then(s => { diag[s && ['ok', 'vacio'].includes(s.status) ? 'info' : 'aviso']('sesion', `Comprobar sesión: ${s ? s.status + ' · ' + s.msg : 'sin estado'}`); return s; }) : null));   // revisión manual: sin notificación del sistema, el resultado se ve en pantalla
 // Un único inicio de sesión (desde Ajustes) vale para Avisos, Mensajes, Notas e Ingestar novedades: comparten la sesión del perfil. Al cerrar la ventana se revisa todo y se avisa a la pantalla.
-ipcMain.handle('bb:login', (e) => { if (fromWin(e)) cur.avisos.abrir(() => { revisarBB(true); mensajesMod.check({ silencioso: true, onCambio: avisaMensajes }).then(avisaMensajes).catch(() => {}); if (win && !win.isDestroyed()) win.webContents.send('ui:sesion'); }); });
+ipcMain.handle('bb:login', (e) => {
+  if (!fromWin(e)) return { ok: false, msg: 'No permitido' };
+  let host = ''; try { host = profile && profile.campusUrl ? new URL(profile.campusUrl).host : ''; } catch { host = '(URL no válida)'; }
+  diag.info('sesion', `pulsado Iniciar sesión · campus ${profile ? profiles.tipoDe(profile) : '—'} ${host || '(sin URL)'}`);
+  try { if (profile && profile.campusUrl && profiles._esPaginaDeLogin(profile.campusUrl)) { diag.aviso('sesion', `la URL del campus del perfil (${host}) es la página de inicio de sesión de la universidad, no el campus`); return { ok: false, msg: `La URL del campus de tu perfil (${host}) es la página de inicio de sesión de la universidad, no el campus. Cámbiala en ✎ Editar perfil por la dirección que ves en el navegador una vez dentro del campus o del aula.` }; } } catch {}
+  try {
+    const r = cur.avisos.abrir(() => {
+      diag.info('sesion', 'ventana cerrada: se comprueba la sesión');
+      revisarBB(true).then(s => diag[s && s.status === 'ok' ? 'info' : 'aviso']('sesion', `resultado: ${s ? s.status + ' · ' + s.msg : 'sin estado'}`)).catch(err => diag.error('sesion', err));
+      mensajesMod.check({ silencioso: true, onCambio: avisaMensajes }).then(avisaMensajes).catch(() => {});
+      if (win && !win.isDestroyed()) win.webContents.send('ui:sesion');
+    });
+    return r || { ok: true };
+  } catch (err) { diag.error('sesion', err); return { ok: false, msg: 'No se pudo abrir la ventana de inicio de sesión: ' + (err && err.message || err) }; }
+});
 ipcMain.handle('bb:seen', (e) => (fromWin(e) ? cur.avisos.marcarVistas() : null));
 
 // ---- Perfiles: inicio de sesión local, alta/edición/baja y selector de carpeta ----
@@ -400,11 +421,14 @@ const ok = (extra) => ({ ok: true, ...extra }), ko = (e) => ({ ok: false, msg: S
 ipcMain.handle('prof:state', (e) => (fromWin(e) ? estadoPerfiles() : null));
 ipcMain.handle('prof:login', async (e, id, pin) => {
   if (!fromWin(e)) return ko('No permitido');
-  const p = profiles.buscar(id); if (!p) return ko('Perfil no encontrado');
+  const p = profiles.buscar(id); if (!p) { diag.aviso('perfil', `entrar: perfil ${id} no encontrado`); return ko('Perfil no encontrado'); }
+  diag.info('perfil', `entrar en el perfil ${p.id} (${p.pin ? 'con' : 'sin'} PIN · campus ${profiles.tipoDe(p)})`);
   if (pinFallos >= 5) { await sleep(Math.min(30000, 2000 * (pinFallos - 4))); }   // freno suave contra probar PIN uno tras otro
-  if (!profiles.pinOk(p, pin)) { pinFallos++; return ko('PIN incorrecto'); }
-  if (!profiles.esDir(p.vault)) return ko('La carpeta del Brain de este perfil ya no existe: edítala para elegir otra');
-  pinFallos = 0; activar(p); return ok(estadoPerfiles());
+  if (!profiles.pinOk(p, pin)) { pinFallos++; diag.aviso('perfil', `PIN incorrecto (${pinFallos} seguido${pinFallos > 1 ? 's' : ''})`); return ko('PIN incorrecto'); }
+  if (!profiles.esDir(p.vault)) { diag.aviso('perfil', `la carpeta del perfil no existe: ${p.vault}`); return ko('La carpeta del Brain de este perfil ya no existe: edítala para elegir otra'); }
+  pinFallos = 0;
+  try { activar(p); } catch (err) { diag.error('perfil', err); return ko('No se pudo abrir el perfil: ' + (err && err.message || err)); }
+  diag.info('perfil', `perfil abierto (${L.esBrain(p.vault) ? 'Brain' : 'carpeta libre'})`); return ok(estadoPerfiles());
 });
 ipcMain.handle('prof:create', (e, d) => { if (!fromWin(e)) return ko('No permitido'); try { const p = profiles.crear(d || {}); return ok({ id: p.id }); } catch (err) { return ko(err); } });
 ipcMain.handle('prof:update', (e, id, d, pinActual) => {
