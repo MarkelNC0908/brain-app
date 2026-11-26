@@ -270,3 +270,54 @@ body:not([data-os=darwin]) #bar{height:40px}
 .log-box{width:min(860px,calc(100vw - 32px));max-height:calc(100vh - 48px);overflow:auto}
 .ver-log{margin-top:4px;font-size:12px}
 @media (max-width:620px){.log-l{grid-template-columns:auto 1fr}.log-t,.log-h{display:none}}
+
+/* ---------- Apariencia personalizable (apariencia.js): fondo de pantalla, cristal, esquinas, letra, acento y animaciones ----------
+   Sin tema propio (Clásico) nada de esto cambia la app: solo actúa con las clases ap-* en <body>. */
+:root{--glass-rgb:255,255,255;--glass-a:.6;--glass-blur:18px;--rc:12px;--velo:0;--fblur:0px}
+@media(prefers-color-scheme:dark){:root{--glass-rgb:30,30,34}}
+html,body{font-family:var(--font,-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif)}
+#fondo{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;display:none}
+#fondo i{position:absolute;inset:0;background:center/cover no-repeat;filter:blur(var(--fblur))}
+#fondo::after{content:"";position:absolute;inset:0;background:rgba(0,0,0,var(--velo))}
+body.ap-fondo #fondo{display:block}
+body.ap-fblur #fondo i{transform:scale(1.06)}
+/* con fondo: lateral y panel principal translúcidos para que se vea la imagen; con un mínimo de opacidad para que el texto gris se siga leyendo sobre fotos claras */
+body.ap-fondo #side{background:rgba(var(--glass-rgb),.6);backdrop-filter:blur(var(--glass-blur)) saturate(160%)}
+body.ap-fondo #main{background:rgba(var(--glass-rgb),.9)}
+body.ap-fondo.ap-cristal #side{background:rgba(var(--glass-rgb),calc(.3 + var(--glass-a) * .5))}
+body.ap-fondo.ap-cristal #main{background:rgba(var(--glass-rgb),calc(.45 + var(--glass-a) * .5));backdrop-filter:blur(var(--glass-blur)) saturate(160%)}
+/* recuadros de cristal */
+body.ap-cristal :is(.card,.kpi,.av,.kc,.aj-sec,.nt-sec,.hoy,.rs-card,.msg-row,.msg-bub,.hday,.pl-dia,.qcard,.ia-guia,.rs-det,.dmsg,.pcard,.ia-bar){background:rgba(var(--glass-rgb),var(--glass-a));backdrop-filter:blur(var(--glass-blur)) saturate(160%);box-shadow:inset 0 0 0 1px var(--glass-edge,var(--line))}
+body.ap-cristal #bar{background:rgba(var(--glass-rgb),calc(var(--glass-a) * .6));backdrop-filter:blur(var(--glass-blur))}
+/* esquinas */
+body.ap-radio :is(.card,.kpi,.av,.kc,.aj-sec,.nt-sec,.hoy,.rs-card,.msg-row,.msg-bub,.hday,.pl-dia,.qcard,.ia-guia,.rs-det,.dmsg,.pcard,.ia-bar,.box,.colm){border-radius:var(--rc)}
+body.ap-radio #main{border-radius:var(--rc) 0 0 var(--rc)}
+/* animaciones: entrada de los recuadros al pintarse y respuesta al pasar el ratón */
+@keyframes ap-sube{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes ap-zoom{from{transform:scale(1.06)}to{transform:scale(1.14)}}
+body.ap-anim-suave :is(.card,.kpi,.av,.kc,.nt-sec,.hoy,.rs-card,.msg-row,.hday,.pl-dia,.qcard){animation:ap-sube .35s cubic-bezier(.2,.7,.2,1) both}
+body.ap-anim-viva :is(.card,.kpi,.av,.kc,.nt-sec,.hoy,.rs-card,.msg-row,.hday,.pl-dia,.qcard){animation:ap-sube .55s cubic-bezier(.2,1.4,.4,1) both}
+body.ap-anim-suave :is(.card,.kc,.rs-card,.msg-row,.pl-dia){transition:transform .2s,box-shadow .2s}
+body.ap-anim-suave :is(.card,.kc,.rs-card,.msg-row,.pl-dia):hover{transform:translateY(-2px)}
+body.ap-anim-viva :is(.card,.kc,.rs-card,.msg-row,.pl-dia){transition:transform .25s cubic-bezier(.2,1.4,.4,1),box-shadow .25s}
+body.ap-anim-viva :is(.card,.kc,.rs-card,.msg-row,.pl-dia):hover{transform:translateY(-3px) scale(1.02);box-shadow:0 10px 26px #0004}
+body.ap-anim-viva #fondo i{animation:ap-zoom 24s ease-in-out infinite alternate}
+@media(prefers-reduced-motion:reduce){body[class*=ap-anim] *,body[class*=ap-anim] #fondo i{animation:none!important;transition:none!important}}
+/* controles de Ajustes › Apariencia */
+.ap-h{margin:16px 0 4px;font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}
+.ap-fila{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.ap-fila select{padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+.ap-fila button,.ap-imp{border:0;border-radius:8px;padding:7px 14px;background:var(--sel);color:var(--fg);cursor:pointer;font:inherit}.ap-fila button.pri{background:var(--acc);color:#fff}
+.ap-preset{display:flex;flex-direction:column;gap:6px;min-width:130px;text-align:left;padding:8px!important;background:var(--hover)!important;color:var(--fg)!important;font-weight:600}
+.ap-prev{display:block;height:34px;border-radius:7px;border:1px solid var(--line)}
+.ap-gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin:8px 0}
+.ap-mini{position:relative}
+.ap-img{display:block;width:100%;height:72px;border:2px solid var(--line);border-radius:10px;background:var(--hover) center/cover no-repeat;cursor:pointer}
+.ap-img.on,.ap-inc.on{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc)}
+.ap-x{position:absolute;top:4px;right:4px;width:26px;height:26px;border:0;border-radius:50%;background:#000a;color:#fff;cursor:pointer;font-size:12px;line-height:1}
+.ap-inc{width:56px;height:40px;padding:0!important;border:2px solid var(--line)!important;border-radius:9px}
+.ap-acc{width:30px;height:30px;padding:0!important;border-radius:50%!important;border:3px solid transparent!important}.ap-acc.on{border-color:var(--fg)!important}
+.ap-fila input[type=color]{width:38px;height:30px;padding:0;border:1px solid var(--line);border-radius:8px;background:none;cursor:pointer}
+.ap-rango{display:flex;flex-direction:column;gap:2px;max-width:420px;margin:8px 0;font-size:13px}.ap-rango span{display:flex;justify-content:space-between}.ap-rango input{accent-color:var(--acc)}
+.ap-imp{position:relative;overflow:hidden}.ap-imp input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.ap-fin{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}

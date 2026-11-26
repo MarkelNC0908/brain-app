@@ -1,0 +1,24 @@
+// Apariencia (src/apariencia.js): normalizar temas guardados o importados y traducirlos a variables CSS y clases
+const A = require('../src/apariencia.js');
+let ok = 0, ko = 0; const t = (n, c) => { c ? ok++ : (ko++, console.log('FALLA', n)); };
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+t('vacío → por defecto', eq(A.apNormaliza({}), A.AP_DEF) && eq(A.apNormaliza(null), A.AP_DEF) && eq(A.apNormaliza('x'), A.AP_DEF));
+const n = A.apNormaliza({ fondo: 'img:0123456789abcdef.png', acento: '#ABCDEF', fuente: 'serif', cristal: true, opac: 500, blur: -3, borde: true, radio: 99, anim: 'viva', velo: 33, fblur: 7.6, extra: 'x' });
+t('imagen propia válida', n.fondo === 'img:0123456789abcdef.png');
+t('acento en minúsculas', n.acento === '#abcdef');
+t('rangos acotados y redondeados', n.opac === 95 && n.blur === 0 && n.radio === 28 && n.velo === 33 && n.fblur === 8);
+t('sin claves desconocidas', !('extra' in n) && Object.keys(n).length === Object.keys(A.AP_DEF).length);
+t('valores no válidos → por defecto', eq(A.apNormaliza({ fondo: 'img:../../x.png', acento: 'red', fuente: 'comic', anim: 'loca', cristal: 'sí', radio: 'a' }), Object.assign({}, A.AP_DEF, { radio: null })));
+t('fondo con ruta rechazado', A.apNormaliza({ fondo: 'img:/etc/passwd' }).fondo === 'ninguno' && A.apNormaliza({ fondo: 'url(javascript:x)' }).fondo === 'ninguno');
+t('acento que intenta inyectar CSS', A.apNormaliza({ acento: '#000000;background:url(x)' }).acento === A.AP_DEF.acento);
+const d = A.apVars(A.AP_DEF);
+t('clásico no añade clases', d.clases.length === 0);
+t('clásico deja la letra y las esquinas de siempre', d.vars['--font'] === '' && d.vars['--rc'] === '' && d.vars['--glass-edge'] === '');
+const v = A.apVars(n);
+t('clases del tema', eq(v.clases.sort(), ['ap-anim-viva', 'ap-cristal', 'ap-fblur', 'ap-fondo', 'ap-radio']));
+t('variables', v.vars['--acc'] === '#abcdef' && v.vars['--sel'] === '#abcdef33' && v.vars['--glass-a'] === '0.95' && v.vars['--rc'] === '28px' && v.vars['--velo'] === '0.33' && /serif/.test(v.vars['--font']) && v.vars['--glass-edge'] !== '');
+t('presets válidos y con nombre', Object.values(A.AP_PRESETS).every(([nom, p]) => nom && eq(A.apNormaliza(p), (({ tema, ...r }) => A.apNormaliza(r))(p))));
+t('clásico = por defecto', eq(A.AP_PRESETS.clasico[1], A.AP_DEF));
+t('fondos de los presets existen', Object.values(A.AP_PRESETS).every(([, p]) => A.AP_FONDOS[p.fondo]));
+t('acentos con formato válido', A.AP_ACENTOS.every(([c]) => /^#[0-9a-f]{6}$/.test(c)));
+console.log('ok', ok, 'ko', ko);

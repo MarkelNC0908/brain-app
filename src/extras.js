@@ -708,18 +708,20 @@ function resaltaDestino(d) {
 }
 
 
-// ---------- 9 · Apariencia: tamaño de letra (zoom de la interfaz) y tema claro/oscuro/automático ----------
+// ---------- 9 · Apariencia: tamaño de letra (zoom de la interfaz), tema claro/oscuro/automático y, desde la 1.0.19, el resto en apariencia.js ----------
 const ZOOMS = [['0.9', 'Pequeño'], ['1', 'Normal'], ['1.15', 'Grande'], ['1.3', 'Muy grande']], KZOOM = 'brain-zoom';
 function aplicaZoom() { const z = parseFloat(lsGet(KZOOM)) || 1; document.documentElement.style.zoom = z === 1 ? '' : String(z); }
 aplicaZoom();
 async function pintaApariencia() {
   const w = $('#aj-apar'); if (!w) return; w.replaceChildren(); w.append(el('h2', null, '🎨 Apariencia'));
+  const tk = w.dataset.tk = String(Math.random());   // si se vuelve a pintar mientras esperamos, esta pasada se abandona (evita controles duplicados)
   const f = el('div', 'aj-add'), sz = el('select'); for (const [v, t] of ZOOMS) sz.append(Object.assign(el('option', null, t), { value: v })); sz.value = ZOOMS.some(([v]) => v === (lsGet(KZOOM) || '1')) ? (lsGet(KZOOM) || '1') : '1'; sz.onchange = () => { lsSet(KZOOM, sz.value); aplicaZoom(); };
   f.append(el('span', null, 'Tamaño de letra:'), sz); w.append(f);
   if (esEscritorio() && window.brain.ajustesGet) {
-    let a; try { a = await window.brain.ajustesGet(); } catch { a = null; } if (view !== 'ajustes') return;
+    let a; try { a = await window.brain.ajustesGet(); } catch { a = null; } if (view !== 'ajustes' || w.dataset.tk !== tk) return;
     if (a && a.ok) { const g = el('div', 'aj-add'), th = el('select'); for (const [v, t] of [['auto', 'Automático (como el sistema)'], ['claro', 'Claro'], ['oscuro', 'Oscuro']]) th.append(Object.assign(el('option', null, t), { value: v })); th.value = a.tema || 'auto'; th.onchange = () => window.brain.ajustesSet({ tema: th.value }); g.append(el('span', null, 'Tema:'), th); w.append(g); }
   }
+  if (typeof apPintaControles === 'function') { await apPintaControles(w, tk); if (w.dataset.tk !== tk) return; }   // temas, fondo de pantalla, cristal, letra, acento y animaciones (apariencia.js)
   w.append(el('p', 'dsub', 'El idioma de la app es el español: la traducción a otros idiomas no está hecha.'));
 }
 

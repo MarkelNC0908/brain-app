@@ -254,6 +254,18 @@ ipcMain.handle('ajustes:set', (e, patch) => {
   try { fs.writeFileSync(profiles.datos(profile).ajustes, JSON.stringify(a)); } catch (err) { return { ok: false, msg: String(err.message || err) }; }
   aplicaTema(); return { ok: true, ...a, atajoOk: aplicaAtajo() };
 });
+// Fondos de pantalla (Ajustes › Apariencia): copias de las imágenes del usuario en userData/fondos, fuera del Brain y de Git (ver fondos.js)
+const fondosMod = require('./fondos'), fondosDir = () => path.join(app.getPath('userData'), 'fondos');
+const miniFondo = (id) => { try { const { nativeImage } = require('electron'); const im = nativeImage.createFromPath(path.join(fondosDir(), id)); if (im.isEmpty()) return ''; return im.resize({ width: 240, quality: 'good' }).toDataURL(); } catch { return ''; } };   // miniatura para la galería (WebP/GIF pueden no tenerla: se ve el nombre)
+ipcMain.handle('fondos:lista', (e) => (fromWin(e) ? fondosMod.lista(fondosDir()).map(f => ({ ...f, mini: miniFondo(f.id) })) : []));
+ipcMain.handle('fondos:anadir', async (e) => {
+  if (!fromWin(e)) return { ok: false, msg: 'No permitido' };
+  const r = await dialog.showOpenDialog(win, { title: 'Añadir imágenes de fondo', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Imágenes', extensions: fondosMod.EXTS }] });
+  if (r.canceled || !r.filePaths.length) return { ok: true, anadidas: [], errores: [] };
+  const res = fondosMod.anadir(fondosDir(), r.filePaths); diag.info('fondos', `Añadidos ${res.anadidas.length} fondo(s), ${res.errores.length} rechazado(s)`); return res;
+});
+ipcMain.handle('fondos:quitar', (e, id) => (fromWin(e) ? fondosMod.quitar(fondosDir(), id) : { ok: false }));
+ipcMain.handle('fondos:datos', (e, id) => (fromWin(e) ? fondosMod.datos(fondosDir(), id) : { ok: false }));
 // Aviso de notas nuevas: relee las notas de Blackboard cada 3 h (y a los 2 min de abrir) y avisa de las que son nuevas o han cambiado
 async function revisarNotas() {
   if (!vault || !profile || !cur.ingesta.notasLeer || !leeAjustes().avisoNotas) return;
