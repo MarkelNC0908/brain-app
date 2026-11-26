@@ -1,0 +1,42 @@
+const __V = process.env.BRAIN_DIR || require('path').resolve(__dirname, 'fixtures/brain-demo');
+if (!require('fs').existsSync(__V + '/02-Asignaturas')) { console.log('ok 0 ko 0 (omitido: no hay Brain)'); process.exit(0); }
+// 1.0.20: configurar el menú lateral, color e icono por asignatura, tema por perfil y modo concentración
+const { arranca, sleep } = require('./harness.js');
+(async () => {
+  const { w, errores } = await arranca();
+  let ok = 0, ko = 0; const t = (n, c) => { c ? ok++ : (ko++, console.log('FALLA', n)); };
+  const $ = (s) => w.document.querySelector(s), $$ = (s) => [...w.document.querySelectorAll(s)], body = w.document.body, ev = (x, n) => x.dispatchEvent(new w.Event(n, { bubbles: true }));
+  w.eval('showAjustes()'); await sleep(600);
+  t('sección del menú lateral', /Menú lateral/.test($('#aj-apar').textContent) && $$('.lat-cfg-f').length === 14);
+  t('sección de asignaturas', /Asignaturas/.test($('#aj-apar').textContent) && $$('.asig-cfg-f').length === 6);
+  const fila = $$('.lat-cfg-f').find(f => /Preguntar/.test(f.textContent)), sel = fila.querySelector('select'); sel.value = 'vista'; ev(sel, 'change'); await sleep(100);
+  t('Preguntar pasa a la vista', $('#snav > .snav-it[data-id="preguntar"]') && !$('.snav-masbox [data-id="preguntar"]'));
+  const antes = JSON.parse(w.eval('JSON.stringify(latMenu().orden)')), iA = antes.indexOf('avisos');
+  $$('.lat-cfg-f').find(f => /Avisos/.test(f.textContent)).querySelector('[aria-label="Subir Avisos"]').click(); await sleep(400);
+  const despues = JSON.parse(w.eval('JSON.stringify(latMenu().orden)')); t('cambiar el orden', despues.indexOf('avisos') === iA - 1);
+  t('Ajustes no se puede mandar a «Más»', $$('.lat-cfg-f').find(f => /Ajustes/.test(f.textContent)).querySelector('select').disabled);
+  const fb = $$('.asig-cfg-f').find(f => /BRS/.test(f.textContent)); const col = fb.querySelector('input[type=color]'); col.value = '#123456'; ev(col, 'change'); await sleep(400);
+  t('color de la asignatura', w.eval('COLOR.brs') === '#123456' && JSON.parse(w.localStorage.getItem('brain-asig')).brs.c === '#123456');
+  const fb2 = $$('.asig-cfg-f').find(f => /BRS/.test(f.textContent)), ic = fb2.querySelector('select'); ic.value = 'escudo'; ev(ic, 'change'); await sleep(400);
+  t('icono en las insignias del menú', !!$$('#sasig .sasig-it').find(b => /BRS/.test(b.getAttribute('title') || '') && b.querySelector('svg')));
+  t('icono en la cabecera del árbol', !!$('.grp[data-s="brs"] i.con-ico svg'));
+  w.eval('home()'); await sleep(300); w.eval('asigDecora()');
+  t('icono en la tarjeta de Inicio', !!$('.card[data-s="brs"] b i.con-ico svg'));
+  w.eval('showAjustes()'); await sleep(600);
+  $$('.asig-cfg-f').find(f => /BRS/.test(f.textContent)).querySelector('[aria-label^="Restablecer"]').click(); await sleep(400);
+  t('restablecer la asignatura', w.eval('COLOR.brs') !== '#123456' && !w.eval('asigIcono("brs")'));
+  w.eval("apGuarda({ acento: '#e5246b' })"); await sleep(50);
+  w.eval("PROFILE = { id: 'otro' }; cargaP('otro')"); await sleep(100);
+  t('un perfil sin tema propio hereda el general', w.document.documentElement.style.getPropertyValue('--acc') === '#e5246b');
+  w.eval("apGuarda({ acento: '#1f8a4c' })"); await sleep(50);
+  t('se guarda en el perfil', JSON.parse(w.localStorage.getItem('brain-apariencia-otro')).acento === '#1f8a4c' && JSON.parse(w.localStorage.getItem('brain-apariencia')).acento === '#e5246b');
+  w.eval("PROFILE = { id: 'default' }; cargaP('default')"); await sleep(100);
+  t('al volver al otro perfil, su tema', w.document.documentElement.style.getPropertyValue('--acc') === '#e5246b');
+  w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: '.', metaKey: true, bubbles: true })); await sleep(50);
+  t('Cmd+. activa el modo concentración', body.classList.contains('foco') && !!$('#foco-salir'));
+  w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(50);
+  t('Esc sale', !body.classList.contains('foco') && !$('#foco-salir'));
+  w.eval('latMasAbierto = true; latPintaNav()'); $('[data-id="concentracion"]').click(); await sleep(50);
+  t('desde el menú', body.classList.contains('foco')); $('#foco-salir').click(); t('botón de salir', !body.classList.contains('foco'));
+  console.log('errores', errores.length, errores.slice(0, 2), 'ok', ok, 'ko', ko); process.exit(errores.length ? 1 : 0);
+})();

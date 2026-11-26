@@ -73,8 +73,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = { AP_DEF, 
 
 // ---------- En la página ----------
 let apTema = AP_DEF, apUrl = '', apUrlId = '';
-function apLee() { try { return JSON.parse(localStorage.getItem(AP_K) || '{}'); } catch { return {}; } }
-function apGuarda(cambios) { apTema = apNormaliza(Object.assign({}, apTema, cambios)); try { localStorage.setItem(AP_K, JSON.stringify(apTema)); } catch {} return apAplica(); }
+// Cada perfil tiene su tema (brain-apariencia-<perfil>); si un perfil aún no tiene, usa el general de antes de la 1.0.20
+const apK = () => AP_K + (typeof sufPerfil === 'function' ? sufPerfil() : '');
+function apLee() { try { return JSON.parse(localStorage.getItem(apK()) || localStorage.getItem(AP_K) || '{}'); } catch { return {}; } }
+function apGuarda(cambios) { apTema = apNormaliza(Object.assign({}, apTema, cambios)); try { localStorage.setItem(apK(), JSON.stringify(apTema)); } catch {} return apAplica(); }
 const apHayFondos = () => !!(window.brain && window.brain.fondosLista && window.brain.fondoDatos);
 
 async function apAplica(t = apTema) {
@@ -152,7 +154,7 @@ async function apPintaControles(w, tk) {
   for (const [id, [n]] of Object.entries(AP_FUENTES)) fs.append(Object.assign(el('option', null, n), { value: id }));
   fs.value = t.fuente; fs.onchange = () => apGuarda({ fuente: fs.value }); ft.append(el('span', null, 'Tipo de letra:'), fs);
   const ac = fila(); ac.append(el('span', null, 'Color de acento:'));
-  for (const [c, n] of AP_ACENTOS) { const b = el('button', 'ap-acc' + (t.acento === c ? ' on' : '')); b.type = 'button'; b.title = n; b.setAttribute('aria-label', 'Acento ' + n); b.style.background = c; b.onclick = async () => { await apGuarda({ acento: c }); rep(); }; ac.append(b); }
+  for (const [c, n] of AP_ACENTOS) { const b = el('button', 'ap-color' + (t.acento === c ? ' on' : '')); b.type = 'button'; b.title = n; b.setAttribute('aria-label', 'Acento ' + n); b.style.background = c; b.onclick = async () => { await apGuarda({ acento: c }); rep(); }; ac.append(b); }
   const cp = el('input'); cp.type = 'color'; cp.value = t.acento; cp.title = 'Otro color'; cp.setAttribute('aria-label', 'Otro color de acento'); cp.onchange = async () => { await apGuarda({ acento: cp.value }); rep(); }; ac.append(cp);
 
   h('Recuadros');
@@ -186,4 +188,8 @@ function apRango(w, txt, k, min, max, step, ud, sinValor) {
   i.oninput = () => { v.textContent = i.value + ud; apGuarda({ [k]: Number(i.value) }); };
 }
 
-if (typeof document !== 'undefined') { apTema = apNormaliza(apLee()); apAplica(); }
+if (typeof document !== 'undefined') {
+  apTema = apNormaliza(apLee()); apAplica();
+  // al elegir o cambiar de perfil (perfiles-ui.js llama a cargaP) se carga el tema y los colores de ese perfil
+  if (typeof cargaP === 'function') { const orig = cargaP; cargaP = function (id) { orig.apply(this, arguments); apTema = apNormaliza(apLee()); apAplica(); if (typeof asigAplica === 'function') { asigAplica(); asigRepinta(); } if (typeof pintaApariencia === 'function' && typeof view !== 'undefined' && view === 'ajustes') pintaApariencia(); }; }
+}

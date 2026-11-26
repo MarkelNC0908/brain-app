@@ -177,19 +177,20 @@ ipcMain.handle('enl:guardar', (e, lista) => {
 ipcMain.handle('ia:tarea', (e, d) => (fromWin(e) && d && typeof d === 'object' ? asistenteMod.tarea({ tipo: String(d.tipo || ''), texto: String(d.texto || ''), proveedor: d.proveedor === 'gemini' ? 'gemini' : 'ollama', modelo: String(d.modelo || '') }) : { ok: false, msg: 'No permitido' }));
 // Exportar a calendario (.ics): entregas y exámenes pendientes de los próximos meses, con aviso el día anterior. Solo escribe el archivo que eliges.
 const icsTxt = (t) => String(t).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
-function construyeIcs(items, hoy) {
+function construyeIcs(items, hoy, excluir) {
   const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Brain//Entregas//ES', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:Brain · entregas y exámenes'], stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
-  let n = 0;
+  let n = 0; const uids = [];
   for (const i of items) {
     if (!i.fecha || !/^\d{4}-\d{2}-\d{2}$/.test(i.fecha) || i.fecha < hoy || (i.col !== 'todo' && i.col !== 'doing' && i.col !== 'sent') || i.tipo === 'calendario' || i.tipo === 'tarea' || (i.titulo || '').length > 90) continue;
     const d = i.fecha.replace(/-/g, ''), h = /^\d{1,2}:\d{2}$/.test(i.hora || '') ? i.hora.padStart(5, '0').replace(':', '') + '00' : '';
     const fin = (() => { const x = new Date(i.fecha + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10).replace(/-/g, ''); })();
-    L.push('BEGIN:VEVENT', `UID:brain-${require('crypto').createHash('sha1').update(i.sigla + '|' + i.fecha + '|' + i.titulo).digest('hex').slice(0, 16)}@brain`, `DTSTAMP:${stamp}`,
+    const uid = `brain-${require('crypto').createHash('sha1').update(i.sigla + '|' + i.fecha + '|' + i.titulo).digest('hex').slice(0, 16)}@brain`; if (excluir && excluir.has(uid)) continue; uids.push(uid);
+    L.push('BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${stamp}`,
       h ? `DTSTART:${d}T${h}` : `DTSTART;VALUE=DATE:${d}`, h ? `DTEND:${d}T${String(Math.min(23, parseInt(h.slice(0, 2), 10) + 1)).padStart(2, '0')}${h.slice(2)}` : `DTEND;VALUE=DATE:${fin}`,
       `SUMMARY:${icsTxt(`[${i.sigla}] ${i.titulo}`)}`, `DESCRIPTION:${icsTxt(`${i.tipo ? i.tipo + ' · ' : ''}estado: ${i.col === 'sent' ? 'entregado, pendiente de nota' : i.col === 'doing' ? 'en curso' : 'por hacer'}`)}`,
       'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Mañana: ' + icsTxt(i.titulo), 'TRIGGER:-P1D', 'END:VALARM', 'END:VEVENT'); n++;
   }
-  L.push('END:VCALENDAR'); return { texto: L.join('\r\n') + '\r\n', n };
+  L.push('END:VCALENDAR'); return { texto: L.join('\r\n') + '\r\n', n, uids };
 }
 ipcMain.handle('ics:exportar', async (e) => {
   if (!fromWin(e) || !vault) return { ok: false, msg: 'No permitido' };
@@ -199,6 +200,21 @@ ipcMain.handle('ics:exportar', async (e) => {
     const sel = await dialog.showSaveDialog(win, { title: 'Guardar calendario', defaultPath: path.join(app.getPath('documents'), 'Brain-entregas.ics'), filters: [{ name: 'Calendario (.ics)', extensions: ['ics'] }] });
     if (sel.canceled || !sel.filePath) return { ok: false, cancelado: true };
     fs.writeFileSync(sel.filePath, texto, 'utf8'); return { ok: true, ruta: sel.filePath, n };
+  } catch (err) { return { ok: false, msg: String(err.message || err) }; }
+});
+// Añadir al calendario del sistema: solo las entregas y exámenes que aún no se habían añadido (se recuerdan sus UID por Brain en userData).
+// Abre el .ics con la aplicación de calendario del sistema, que pide confirmación antes de importar.
+const icsEnviadosF = () => path.join(app.getPath('userData'), 'ics-enviados.json');
+ipcMain.handle('ics:anadir', async (e, forzar) => {
+  if (!fromWin(e) || !vault) return { ok: false, msg: 'No permitido' };
+  try {
+    let todo = {}; try { todo = JSON.parse(fs.readFileSync(icsEnviadosF(), 'utf8')); } catch {}
+    const ya = new Set(forzar ? [] : (todo[vault] || [])), d = new Date(), hoy = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const { texto, n, uids } = construyeIcs(dashboard.build(vault, hoy).items || [], hoy, ya);
+    if (!n) return { ok: true, n: 0 };
+    const f = path.join(app.getPath('temp'), `Brain-nuevas-${hoy}.ics`); fs.writeFileSync(f, texto, 'utf8');
+    const err = await shell.openPath(f); if (err) return { ok: false, msg: err };
+    todo[vault] = [...new Set([...(todo[vault] || []), ...uids])].slice(-2000); fs.writeFileSync(icsEnviadosF(), JSON.stringify(todo)); return { ok: true, n };
   } catch (err) { return { ok: false, msg: String(err.message || err) }; }
 });
 // Guardar una respuesta/resumen de la IA como apunte nuevo (la app pide confirmación antes; ver guardar-apunte.js)
@@ -254,6 +270,34 @@ ipcMain.handle('ajustes:set', (e, patch) => {
   try { fs.writeFileSync(profiles.datos(profile).ajustes, JSON.stringify(a)); } catch (err) { return { ok: false, msg: String(err.message || err) }; }
   aplicaTema(); return { ok: true, ...a, atajoOk: aplicaAtajo() };
 });
+// Fichas de recursos/ (.md): el visor de PDF busca en ellas la ruta del PDF y Simulacros los bancos de test. No entran en el índice de apuntes.
+ipcMain.handle('recursos:lista', (e) => {
+  if (!fromWin(e) || !vault || !L.esBrain(vault)) return [];
+  const files = []; try { walk(path.join(vault, '02-Asignaturas'), '02-Asignaturas', files); } catch { return []; }
+  return files.filter(f => /^02-Asignaturas\/[^/]+\/recursos\/[^/]+\.md$/i.test(f.rel)).slice(0, 800).map(f => { let raw = ''; try { if (fs.statSync(f.abs).size < 2 * 1024 * 1024) raw = fs.readFileSync(f.abs, 'utf8'); } catch {} const { meta, body } = parseFrontmatter(String(raw).replace(/\r\n?/g, '\n')); return { path: f.rel, base: path.basename(f.rel, '.md'), title: meta.title || path.basename(f.rel, '.md'), sigla: (meta.sigla || (f.rel.match(/^02-Asignaturas\/([^/]+)/) || [])[1] || '').toUpperCase(), meta, body }; });
+});
+// Visor de PDF (pdfvisor.js): solo PDF dentro del Brain abierto, nunca fuera de él ni en 99-Privado. Devuelve su URL file:// para el visor integrado.
+const pdfAbs = (rel) => {
+  if (!vault || typeof rel !== 'string' || !/\.pdf$/i.test(rel) || path.isAbsolute(rel) || rel.split(/[\\/]/).includes('..')) return null;
+  const abs = path.resolve(vault, rel), r = path.relative(vault, abs); if (!r || r.startsWith('..') || path.isAbsolute(r) || /(^|[\\/])99-privado([\\/]|$)/i.test(r)) return null;
+  try { return fs.statSync(abs).isFile() ? abs : null; } catch { return null; }
+};
+ipcMain.handle('pdf:ruta', (e, rel) => { if (!fromWin(e)) return { ok: false }; const abs = pdfAbs(rel); return abs ? { ok: true, url: require('url').pathToFileURL(abs).href } : { ok: false, msg: 'No encuentro ese PDF en tu Brain: ' + String(rel).slice(0, 160) }; });
+ipcMain.handle('pdf:fuera', async (e, rel) => { if (!fromWin(e)) return { ok: false }; const abs = pdfAbs(rel); if (!abs) return { ok: false }; const err = await shell.openPath(abs); return err ? { ok: false, msg: err } : { ok: true }; });
+// Texto de cada página (para buscar con Cmd/Ctrl+K si el usuario lo activa). Caché en userData/textcache por ruta, tamaño y fecha.
+ipcMain.handle('pdf:texto', async (e, rel) => {
+  if (!fromWin(e)) return { ok: false }; const abs = pdfAbs(rel); if (!abs) return { ok: false };
+  let st; try { st = fs.statSync(abs); } catch { return { ok: false }; } if (st.size > 40 * 1024 * 1024) return { ok: false, msg: 'PDF demasiado grande' };
+  const dir = path.join(app.getPath('userData'), 'textcache'), clave = require('crypto').createHash('sha256').update(`${abs}|${st.size}|${st.mtimeMs}`).digest('hex').slice(0, 32), f = path.join(dir, clave + '.paginas.json');
+  try { return { ok: true, paginas: JSON.parse(fs.readFileSync(f, 'utf8')) }; } catch {}
+  try {
+    const parse = require('pdf-parse/lib/pdf-parse.js'), paginas = [];
+    await Promise.race([parse(fs.readFileSync(abs), { max: 400, pagerender: (pg) => pg.getTextContent().then(tc => { paginas[pg.pageIndex] = tc.items.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim(); return ''; }) }), new Promise((_, rej) => setTimeout(() => rej(new Error('tiempo agotado')), 30000))]);
+    const out = Array.from({ length: paginas.length }, (_, i) => paginas[i] || '');
+    try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(f, JSON.stringify(out)); } catch {}
+    return { ok: true, paginas: out };
+  } catch (err) { return { ok: false, msg: String(err.message || err) }; }
+});
 // Fondos de pantalla (Ajustes › Apariencia): copias de las imágenes del usuario en userData/fondos, fuera del Brain y de Git (ver fondos.js)
 const fondosMod = require('./fondos'), fondosDir = () => path.join(app.getPath('userData'), 'fondos');
 const miniFondo = (id) => { try { const { nativeImage } = require('electron'); const im = nativeImage.createFromPath(path.join(fondosDir(), id)); if (im.isEmpty()) return ''; return im.resize({ width: 240, quality: 'good' }).toDataURL(); } catch { return ''; } };   // miniatura para la galería (WebP/GIF pueden no tenerla: se ve el nombre)
@@ -266,6 +310,7 @@ ipcMain.handle('fondos:anadir', async (e) => {
 });
 ipcMain.handle('fondos:quitar', (e, id) => (fromWin(e) ? fondosMod.quitar(fondosDir(), id) : { ok: false }));
 ipcMain.handle('fondos:datos', (e, id) => (fromWin(e) ? fondosMod.datos(fondosDir(), id) : { ok: false }));
+ipcMain.handle('fondos:importar', (e, l) => (fromWin(e) ? fondosMod.importar(fondosDir(), l) : { ok: false }));
 // Aviso de notas nuevas: relee las notas de Blackboard cada 3 h (y a los 2 min de abrir) y avisa de las que son nuevas o han cambiado
 async function revisarNotas() {
   if (!vault || !profile || !cur.ingesta.notasLeer || !leeAjustes().avisoNotas) return;

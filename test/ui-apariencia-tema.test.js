@@ -46,7 +46,7 @@ const { arranca, sleep } = require('./harness.js');
   t('deslizador al momento', root.style.getPropertyValue('--velo') === '0.4' && /40 %/.test(velo.closest('label').textContent));
   const fsel = $$('#aj-apar select').find(s => s.getAttribute('aria-label') === 'Tipo de letra'); fsel.value = 'mono'; fsel.dispatchEvent(new w.Event('change')); await sleep(100);
   t('tipo de letra', /monospace/.test(root.style.getPropertyValue('--font')));
-  await clic($$('#aj-apar .ap-acc')[5]); t('acento', root.style.getPropertyValue('--acc') === '#1f8a4c');
+  await clic($$('#aj-apar .ap-color')[5]); t('acento', root.style.getPropertyValue('--acc') === '#1f8a4c');
   const an = $$('#aj-apar select').find(s => s.getAttribute('aria-label') === 'Animaciones'); an.value = 'viva'; an.dispatchEvent(new w.Event('change')); await sleep(100);
   t('animaciones', body.classList.contains('ap-anim-viva') && !body.classList.contains('ap-anim-suave'));
 

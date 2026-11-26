@@ -27,5 +27,7 @@ const big = path.join(src, 'grande.png'); fs.writeFileSync(big, PNG); fs.truncat
 t('rechaza más de 25 MB', /25 MB/.test(F.anadir(dir, [big]).errores[0].msg));
 t('carpeta como fichero rechazada', /No es un fichero/.test(F.anadir(dir, [path.join(src, 'x.png')].map(p => { fs.mkdirSync(p); return p; })).errores[0].msg));
 t('esImagen con buffer corto', !F.esImagen(Buffer.from([0xff, 0xd8]), 'jpg'));
+const dir2 = path.join(tmp, 'fondos2'), im = F.importar(dir2, [{ id: 'aaaaaaaaaaaaaaaa.png', nombre: 'a.png', b64: PNG.toString('base64') }, { id: '../x.png', nombre: 'mala', b64: PNG.toString('base64') }, { id: 'bbbbbbbbbbbbbbbb.jpg', nombre: 'falsa', b64: PNG.toString('base64') }]);
+t('importar conserva el id y valida', im.hechos.join() === 'aaaaaaaaaaaaaaaa.png' && im.errores.length === 2 && F.lista(dir2)[0].nombre === 'a.png');
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('ok', ok, 'ko', ko);

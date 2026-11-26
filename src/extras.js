@@ -152,7 +152,7 @@ function notasExtras(sec, k, todos, h) {
 
 // ---------- Paleta de búsqueda global (Cmd/Ctrl+K) ----------
 let palAbierta = null;
-const PANTALLAS = [['Inicio', () => home()], ['Captura rápida', () => window.brain.rapidaAbrir && window.brain.rapidaAbrir()], ['Plan de examen y simulacro', () => showPlan()], ['Dudas', () => showDudas()], ['Dashboard', () => showDash()], ['Estudiar (modo juego)', () => showStudy()], ['Horario', () => showHorario()], ['Notas', () => showNotas()], ['Preguntar a mis apuntes', () => showPreguntar()], ['Mensajes', () => showMensajes()], ['Avisos', () => showAvisos()], ['Ajustes', () => showAjustes()]];
+const PANTALLAS = [['Inicio', () => home()], ['Simulacros de test', () => showSimulacros()], ['Captura rápida', () => window.brain.rapidaAbrir && window.brain.rapidaAbrir()], ['Plan de examen y simulacro', () => showPlan()], ['Dudas', () => showDudas()], ['Dashboard', () => showDash()], ['Estudiar (modo juego)', () => showStudy()], ['Horario', () => showHorario()], ['Notas', () => showNotas()], ['Preguntar a mis apuntes', () => showPreguntar()], ['Mensajes', () => showMensajes()], ['Avisos', () => showAvisos()], ['Ajustes', () => showAjustes()]];
 function preguntaRapida(q) { rsQ = q; rsSigla = ''; rsRes = RESP.responde(notes, '', q); rsIA = null; rsPrev = []; showPreguntar(); }
 let paletaT = -1e9;
 function paleta() {
@@ -194,7 +194,10 @@ function pintaCalendario() {
   const row = el('div', 'aj-add'), b = el('button', 'pri', 'Exportar entregas y exámenes (.ics)'), av = el('p', 'dsub', ''); b.onclick = async () => {
     b.disabled = true; let r; try { r = await window.brain.icsExportar(); } catch (e) { r = { ok: false, msg: String(e.message || e) }; } b.disabled = false;
     av.textContent = r && r.ok ? `Guardado: ${r.ruta} (${r.n} eventos).` : r && r.cancelado ? '' : (r && r.msg) || 'No se pudo exportar';
-  }; row.append(b); w.append(row, av);
+  }; row.append(b);
+  // añadir directamente al calendario del sistema (solo lo nuevo)
+  if (window.brain.icsAnadir) { const a = el('button', null, 'Añadir lo nuevo a mi calendario'); a.title = 'Abre en el calendario del sistema solo las entregas y exámenes que aún no habías añadido'; a.onclick = async () => { a.disabled = true; let r; try { r = await window.brain.icsAnadir(false); } catch (e) { r = { ok: false, msg: String(e.message || e) }; } a.disabled = false; av.textContent = r && r.ok ? (r.n ? `Se ha abierto tu calendario con ${r.n} evento(s) nuevo(s): confírmalo allí.` : 'No hay entregas ni exámenes nuevos: ya estaban todos en tu calendario.') : (r && r.msg) || 'No se pudo abrir el calendario'; }; row.append(a); }
+  w.append(row, av);
 }
 iaCargaEstado();
 
@@ -636,17 +639,21 @@ function resumenCopia(datos) {
 async function exportaCopia() {
   const enl = esEscritorio() && window.brain.enlacesLista ? await window.brain.enlacesLista().catch(() => null) : null;
   const copia = { formato: 'brain-datos', version: 1, fecha: new Date().toISOString(), datos: datosParaCopia(), enlaces: enl && enl.ok ? enl.lista : [] };
+  // con la casilla marcada, también las imágenes de fondo (pueden pesar mucho)
+  if (lsGet('brain-copia-fondos') === '1' && window.brain.fondosLista) { const fondos = []; for (const f of await window.brain.fondosLista().catch(() => [])) { const d = await window.brain.fondoDatos(f.id).catch(() => null); if (d && d.ok) fondos.push({ id: f.id, nombre: f.nombre, b64: d.url.split(',')[1] }); } if (fondos.length) copia.fondos = fondos; }
   return window.brain.textoGuardar({ nombre: `brain-datos-${isoDe(new Date())}.json`, texto: JSON.stringify(copia, null, 1), extension: 'json', titulo: 'Guardar copia de mis datos' });
 }
 function validaCopia(txt) {
   let j; try { j = JSON.parse(txt); } catch { return { ok: false, msg: 'El fichero no es un JSON válido.' }; }
   if (!j || j.formato !== 'brain-datos' || !j.datos || typeof j.datos !== 'object') return { ok: false, msg: 'No es una copia de datos de Brain.' };
   const datos = {}; for (const [k, v] of Object.entries(j.datos)) { if (!/^brain-[\w.-]+(\{perfil\})?$/.test(k) || EXCLUIR_COPIA.test(k) || typeof v !== 'string' || v.length > 2e6) continue; datos[k] = v; }
-  return { ok: true, datos, enlaces: Array.isArray(j.enlaces) ? j.enlaces.filter(x => x && typeof x.url === 'string').slice(0, 60) : [], fecha: j.fecha };
+  return { ok: true, datos, enlaces: Array.isArray(j.enlaces) ? j.enlaces.filter(x => x && typeof x.url === 'string').slice(0, 60) : [], fecha: j.fecha, fondos: Array.isArray(j.fondos) ? j.fondos : [] };
 }
 async function aplicaCopia(c) {
   const suf = sufPerfil(); let n = 0; for (const [k, v] of Object.entries(c.datos)) { try { localStorage.setItem(k.replace('{perfil}', suf), v); n++; } catch {} }
   if (c.enlaces.length && esEscritorio() && window.brain.enlacesGuardar) await window.brain.enlacesGuardar(c.enlaces).catch(() => {});
+  if (c.fondos && c.fondos.length && window.brain.fondosImportar) await window.brain.fondosImportar(c.fondos).catch(() => {});
+  if (typeof apTema !== 'undefined' && typeof apNormaliza === 'function') { apTema = apNormaliza(apLee()); apAplica(); }
   if (typeof cargaP === 'function') cargaP((typeof PROFILE !== 'undefined' && PROFILE && PROFILE.id) || 'default'); aplicaOcultar(); return n;
 }
 function pintaCopia() {
@@ -659,10 +666,11 @@ function pintaCopia() {
     caja.replaceChildren(); const r = await window.brain.textoAbrir({ extension: 'json', titulo: 'Importar copia de mis datos' }); if (!r || !r.ok) { av.textContent = r && r.cancelado ? '' : (r && r.msg) || 'No se pudo abrir'; return; }
     const c = validaCopia(r.texto); if (!c.ok) { av.textContent = c.msg; return; }
     const cf = el('div', 'gd-f'), si = el('button', 'pri', 'Importar y sustituir'), no = el('button', null, 'Cancelar'), ro = el('div', 'acts2');
-    cf.append(el('p', 'dsub', `Copia del ${(c.fecha || '').slice(0, 10) || '—'}: ${resumenCopia(c.datos)}. Al importar se SUSTITUYEN los datos de ese tipo que tengas ahora en este equipo.`)); ro.append(si, no); cf.append(ro); caja.append(cf);
+    cf.append(el('p', 'dsub', `Copia del ${(c.fecha || '').slice(0, 10) || '—'}: ${resumenCopia(c.datos)}${c.fondos.length ? ` y ${c.fondos.length} imagen(es) de fondo` : ''}. Al importar se SUSTITUYEN los datos de ese tipo que tengas ahora en este equipo.`)); ro.append(si, no); cf.append(ro); caja.append(cf);
     no.onclick = () => caja.replaceChildren(); si.onclick = async () => { const n = await aplicaCopia(c); caja.replaceChildren(); av.textContent = `✓ Importados ${n} datos${c.enlaces.length ? ' y ' + c.enlaces.length + ' enlaces' : ''}.`; };
   };
-  f.append(ex, im); w.append(f, av, caja);
+  const fl = el('label', 'msg-chk'), fc = el('input'); fc.type = 'checkbox'; fc.checked = lsGet('brain-copia-fondos') === '1'; fc.onchange = () => lsSet('brain-copia-fondos', fc.checked ? '1' : '0'); fl.append(fc, document.createTextNode(' Incluir también mis imágenes de fondo (la copia puede pesar bastante más)'));
+  f.append(ex, im); w.append(fl, f, av, caja);
 }
 
 // ---------- 4 · Exportar tarjetas a Anki (texto separado por tabuladores; se importa con Archivo → Importar) ----------
@@ -721,7 +729,10 @@ async function pintaApariencia() {
     let a; try { a = await window.brain.ajustesGet(); } catch { a = null; } if (view !== 'ajustes' || w.dataset.tk !== tk) return;
     if (a && a.ok) { const g = el('div', 'aj-add'), th = el('select'); for (const [v, t] of [['auto', 'Automático (como el sistema)'], ['claro', 'Claro'], ['oscuro', 'Oscuro']]) th.append(Object.assign(el('option', null, t), { value: v })); th.value = a.tema || 'auto'; th.onchange = () => window.brain.ajustesSet({ tema: th.value }); g.append(el('span', null, 'Tema:'), th); w.append(g); }
   }
-  if (typeof apPintaControles === 'function') { await apPintaControles(w, tk); if (w.dataset.tk !== tk) return; }   // temas, fondo de pantalla, cristal, letra, acento y animaciones (apariencia.js)
+  if (typeof apPintaControles === 'function') { await apPintaControles(w, tk); if (w.dataset.tk !== tk) return; }
+  if (typeof latPintaAjustes === 'function') latPintaAjustes(w);   // qué accesos lleva el menú lateral (lateral.js)
+  if (typeof asigPintaAjustes === 'function') asigPintaAjustes(w);   // color e icono de cada asignatura (personaliza.js)
+  if (typeof pdfPintaAjustes === 'function') pdfPintaAjustes(w);   // buscar dentro de los PDF del profesor (pdfvisor.js)   // temas, fondo de pantalla, cristal, letra, acento y animaciones (apariencia.js)
   w.append(el('p', 'dsub', 'El idioma de la app es el español: la traducción a otros idiomas no está hecha.'));
 }
 

@@ -44,7 +44,7 @@ function buildTree() {
   const by = {};
   for (const n of [...notes].sort((a, b) => a.path.localeCompare(b.path, 'es', { numeric: true }))) (by[sigOf(n)] ||= []).push(n);
   for (const s of Object.keys(by).sort()) {
-    const g = el('div', 'grp'); g.style.setProperty('--c', COLOR[s] || '');
+    const g = el('div', 'grp'); g.style.setProperty('--c', COLOR[s] || ''); g.dataset.s = s;
     g.append(el('i'), document.createTextNode(NOMBRES[s] || s.toUpperCase()), el('span', null, by[s].filter(n => !n.borrador).length));
     const box = el('div'); g.onclick = () => { box.hidden = !box.hidden; };
     tree.append(g, box);
@@ -67,7 +67,7 @@ function go(p, destino) {
   const nn = byPath.get(p); if (nn && nn.externo) { window.brain.openFile(p); return; }   // PDF, Word… se abren con su aplicación
   hist = hist.slice(0, hp + 1); hist.push(p); hp = hist.length - 1; show(p); if (destino && typeof resaltaDestino === 'function') resaltaDestino(destino); }
 function goSubject(s) { hist = hist.slice(0, hp + 1); hist.push('@' + s); hp = hist.length - 1; subject(s); }
-function nav(d) { const i = hp + d; if (i < 0 || i >= hist.length) return; hp = i; const h = hist[hp]; h === '@study' ? showStudy(false) : h === '@dash' ? showDash(false) : h === '@avisos' ? showAvisos(false) : h === '@mensajes' ? showMensajes(false) : h === '@horario' ? showHorario(false) : h === '@preguntar' ? showPreguntar(false) : h === '@notas' ? showNotas(false) : h === '@ajustes' ? showAjustes(false) : h === '@plan' ? showPlan(false) : h === '@dudas' ? showDudas(false) : h === '@home' ? home() : h[0] === '@' ? subject(h.slice(1)) : show(h); }
+function nav(d) { const i = hp + d; if (i < 0 || i >= hist.length) return; hp = i; const h = hist[hp]; h === '@study' ? showStudy(false) : h === '@dash' ? showDash(false) : h === '@avisos' ? showAvisos(false) : h === '@mensajes' ? showMensajes(false) : h === '@horario' ? showHorario(false) : h === '@preguntar' ? showPreguntar(false) : h === '@notas' ? showNotas(false) : h === '@ajustes' ? showAjustes(false) : h === '@plan' ? showPlan(false) : h === '@dudas' ? showDudas(false) : h === '@simulacros' && typeof showSimulacros === 'function' ? showSimulacros(false) : h === '@home' ? home() : h[0] === '@' ? subject(h.slice(1)) : show(h); }
 const btns = () => { $('#back').disabled = hp <= 0; $('#fwd').disabled = hp >= hist.length - 1; };
 
 function resolve(target) {
@@ -126,7 +126,7 @@ function home() {
   const grid = el('div', 'home');
   for (const s of Object.keys(NOMBRES)) {
     const k = notes.filter(n => sigOf(n) === s).length;
-    const c = el('div', 'card'); c.style.setProperty('--c', COLOR[s]); const b = el('b'); b.append(el('i'), document.createTextNode(NOMBRES[s])); c.append(b, el('span', null, k ? `${k} apunte(s)` : 'sin apuntes'));
+    const c = el('div', 'card'); c.style.setProperty('--c', COLOR[s]); c.dataset.s = s; const b = el('b'); b.append(el('i'), document.createTextNode(NOMBRES[s])); c.append(b, el('span', null, k ? `${k} apunte(s)` : 'sin apuntes'));
     c.onclick = () => goSubject(s); grid.append(c);
   }
   if (typeof dialogoAsignatura === 'function') { const add = el('div', 'card'); add.append(el('b', null, '＋ Añadir asignatura'), el('span', null, 'Crea su ficha y carpetas en tu Brain')); add.onclick = () => dialogoAsignatura().then(ok => ok && load()); grid.append(add); }

@@ -62,4 +62,16 @@ function datos(dir, id) {
   catch { return { ok: false, msg: 'Ese fondo ya no está.' }; }
 }
 
-module.exports = { lista, anadir, quitar, datos, idValido, esImagen, MAX, MAX_FONDOS, EXTS };
+// Restaurar fondos de una copia de seguridad: [{ id, nombre, b64 }]. Conserva el id (para que el tema los siga encontrando) y valida cada imagen.
+function importar(dir, lista) {
+  const hechos = [], errores = []; try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  const nombres = leeNombres(dir);
+  for (const x of Array.isArray(lista) ? lista.slice(0, MAX_FONDOS) : []) {
+    const id = x && x.id; if (!idValido(id) || typeof x.b64 !== 'string') { errores.push(String((x && x.nombre) || '?')); continue; }
+    const buf = Buffer.from(x.b64, 'base64'); if (buf.length > MAX || !esImagen(buf, id.split('.').pop())) { errores.push(String(x.nombre || id)); continue; }
+    try { fs.writeFileSync(path.join(dir, id), buf); nombres[id] = String(x.nombre || id).slice(0, 120); hechos.push(id); } catch { errores.push(String(x.nombre || id)); }
+  }
+  guardaNombres(dir, nombres); return { ok: true, hechos, errores };
+}
+
+module.exports = { lista, anadir, quitar, datos, importar, idValido, esImagen, MAX, MAX_FONDOS, EXTS };
