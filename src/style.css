@@ -321,3 +321,29 @@ body.ap-anim-viva #fondo i{animation:ap-zoom 24s ease-in-out infinite alternate}
 .ap-rango{display:flex;flex-direction:column;gap:2px;max-width:420px;margin:8px 0;font-size:13px}.ap-rango span{display:flex;justify-content:space-between}.ap-rango input{accent-color:var(--acc)}
 .ap-imp{position:relative;overflow:hidden}.ap-imp input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .ap-fin{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
+
+/* ---------- Menú lateral plegable (lateral.js): accesos con icono y columna de iconos al plegarlo ---------- */
+#sidebtn{font-size:17px!important;margin-right:4px}
+#side{transition:width .2s ease}
+#snav{display:flex;flex-direction:column;gap:1px;padding:0 8px 6px;margin-bottom:4px;border-bottom:1px solid var(--line)}
+.snav-it{position:relative;display:flex;align-items:center;gap:10px;width:100%;padding:5px 10px;border:0;border-radius:8px;background:none;color:var(--fg);cursor:pointer;text-align:left;font:inherit;font-size:13px}
+.snav-it:hover{background:var(--hover)}.snav-it.on{background:var(--sel);color:var(--acc);font-weight:500}
+.snav-it:focus-visible,.sasig-it:focus-visible,#sidebtn:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.snav-ic{flex:none;width:20px;text-align:center;font-size:15px;line-height:1}
+.snav-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.snav-n{min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--err);color:#fff;font-size:10px;line-height:16px;text-align:center}
+#sasig{display:none}
+/* plegado: columna estrecha solo con iconos, insignias de asignatura y las acciones del pie una debajo de otra */
+body.lat-plegado #side{width:72px}
+body.lat-plegado :is(#q,#tree,#who,#sync,.snav-t){display:none}
+body.lat-plegado #snav{padding:0 10px 8px}
+body.lat-plegado .snav-it{justify-content:center;padding:8px 0}
+body.lat-plegado .snav-ic{width:auto;font-size:17px}
+body.lat-plegado .snav-n{position:absolute;top:2px;right:2px}
+body.lat-plegado #sasig{display:flex;flex-direction:column;align-items:center;gap:6px;padding:6px 0;overflow:auto;flex:1}
+.sasig-it{width:44px;height:30px;border:1.5px solid var(--c);border-radius:9px;background:color-mix(in srgb,var(--c) 16%,transparent);color:var(--fg);font:600 11px/1 inherit;cursor:pointer;letter-spacing:.02em}
+.sasig-it:hover{background:color-mix(in srgb,var(--c) 30%,transparent)}
+body.lat-plegado #foot{flex-direction:column;gap:8px;padding:10px 0}
+body.lat-plegado #st{flex:none;justify-content:center}
+body.lat-plegado .acts{flex-direction:column}
+@media(prefers-reduced-motion:reduce){#side{transition:none}}
