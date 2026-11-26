@@ -1,5 +1,5 @@
 // ---------- Menú lateral: se despliega o se pliega en una columna de iconos (botón ☰ de la barra o Cmd/Ctrl+B) ----------
-// Arriba lleva accesos con icono a cada pantalla; plegado solo quedan los iconos y las asignaturas como insignias de color.
+// Arriba lleva accesos con icono a cada pantalla (y la barra superior deja de repetirlos); plegado solo quedan los iconos y las asignaturas como insignias de color.
 // El estado se recuerda en este equipo (localStorage, brain-lateral).
 
 const LAT_K = 'brain-lateral';
@@ -68,6 +68,7 @@ function latCuentas() {
   if (typeof document === 'undefined' || !$('#side') || !$('#bar')) return;
   const t = document.createElement('button'); t.id = 'sidebtn'; t.type = 'button'; t.textContent = '☰'; t.setAttribute('aria-controls', 'side');
   t.onclick = () => latPliega(); $('#bar').prepend(t);
+  document.body.classList.add('lat-on');   // con el menú lateral, la barra de arriba deja de repetir los mismos botones (siguen en la página: el menú los pulsa)
   latPliega(latLee()); latPintaNav();
   document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && String(e.key).toLowerCase() === 'b' && !/^(INPUT|TEXTAREA)$/.test((e.target && e.target.tagName) || '') && !(e.target && e.target.isContentEditable)) { e.preventDefault(); latPliega(); } });
   // al cambiar de pantalla, de apuntes o de contadores: se actualizan el resaltado, las asignaturas y los números

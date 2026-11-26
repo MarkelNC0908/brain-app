@@ -347,3 +347,5 @@ body.lat-plegado #foot{flex-direction:column;gap:8px;padding:10px 0}
 body.lat-plegado #st{flex:none;justify-content:center}
 body.lat-plegado .acts{flex-direction:column}
 @media(prefers-reduced-motion:reduce){#side{transition:none}}
+/* con el menú lateral, arriba solo quedan ☰, atrás/adelante y la ruta: Inicio, Ajustes y las pantallas están en el lateral */
+body.lat-on #bar :is(#hbtn,#setbtn,.tb,.tb2){display:none}

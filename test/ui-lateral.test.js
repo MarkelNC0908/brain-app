@@ -11,6 +11,7 @@ const { arranca, sleep } = require('./harness.js');
   const its = $$('#snav .snav-it'), txt = its.map(b => b.getAttribute('aria-label'));
   t('accesos con icono', its.length >= 10 && ['Inicio', 'Estudiar', 'Dashboard', 'Horario', 'Notas', 'Preguntar', 'Avisos', 'Ajustes'].every(x => txt.includes(x)) && its.every(b => b.querySelector('.snav-ic').textContent.trim()));
   t('desplegado por defecto', !body.classList.contains('lat-plegado'));
+  t('la barra de arriba no repite los botones', body.classList.contains('lat-on') && /body\.lat-on #bar/.test(require('fs').readFileSync(require('path').resolve(__dirname, '../src/style.css'), 'utf8')));
   await sleep(100); tg.click(); await sleep(100);
   t('plegar con el botón', body.classList.contains('lat-plegado') && w.localStorage.getItem('brain-lateral') === 'plegado' && tg.getAttribute('aria-expanded') === 'false');
   t('insignias de asignatura', $$('#sasig .sasig-it').length === 6 && $$('#sasig .sasig-it').some(b => b.textContent === 'BRS'));
